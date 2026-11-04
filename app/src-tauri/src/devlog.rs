@@ -819,7 +819,7 @@ fn process_name(pid: u32) -> Option<String> {
 
 // ---------------------------------------------------------------- wav
 
-fn write_wav(path: &Path, samples: &[f32]) -> anyhow::Result<()> {
+pub(crate) fn write_wav(path: &Path, samples: &[f32]) -> anyhow::Result<()> {
     let spec = hound::WavSpec {
         channels: 1,
         sample_rate: SAMPLE_RATE,

@@ -364,3 +364,50 @@ mod tests {
         assert_eq!(parse_cn_number("一百零八"), Some(108));
     }
 }
+
+/// `--record-wav <路径> [秒数] [前置毫秒]`：用真实麦克风录一段，写成 16kHz 单声道 wav。
+///
+/// 只负责录，不负责节奏和句子 —— 那些交给 `tools/record-corpus.ps1`。
+/// 之所以单独做一个模式：`bench/RESULTS.md` 里的所有数字都来自 TTS 合成语料，
+/// 真人声音这一环一直没验过（`--mic-check` 在本机还测出全零）。
+///
+/// 输出里带 RMS 和峰值，是为了让「设备打开了但收到数字静音」这种情况当场暴露，
+/// 而不是录完 20 句才发现全是零。
+pub fn record_wav(path: &Path, secs: f32, lead_ms: u64) -> anyhow::Result<()> {
+    anyhow::ensure!(secs > 0.5 && secs < 120.0, "录音时长不合理: {secs}s");
+
+    let engine = crate::audio::AudioEngine::start()?;
+    // 刚打开的流前几帧可能是空的，先让它跑一会儿
+    std::thread::sleep(std::time::Duration::from_millis(lead_ms));
+    engine.arm();
+    std::thread::sleep(std::time::Duration::from_secs_f32(secs));
+    let samples = engine.stop();
+
+    let n = samples.len();
+    anyhow::ensure!(n > 0, "没采到任何采样");
+
+    let peak = samples.iter().fold(0f32, |m, s| m.max(s.abs()));
+    let rms = (samples.iter().map(|s| s * s).sum::<f32>() / n as f32).sqrt();
+
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    crate::devlog::write_wav(path, &samples)?;
+
+    println!(
+        "录音完成: {}  （{:.1}s，{} 采样，RMS {:.4}，峰值 {:.4}）",
+        path.display(),
+        n as f32 / TARGET_RATE as f32,
+        n,
+        rms,
+        peak
+    );
+
+    // 这两个阈值不是为了严格判定，是为了让「麦克风其实是哑的」立刻可见
+    if peak < 0.001 {
+        println!("警告: 峰值接近 0，麦克风可能被硬件静音，或系统噪声门把它压成了数字静音");
+    } else if rms < 0.002 {
+        println!("警告: 电平极低，离麦克风太远或增益太小");
+    }
+    Ok(())
+}

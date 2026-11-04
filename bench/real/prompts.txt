@@ -1,0 +1,32 @@
+# 言出 · 真人语料（20 句）
+#
+# 用途：替换掉 bench/corpus 里那批 TTS 合成语料，用真人声音验一次。
+# 合成语料比真人干净，CER 偏乐观；术语保留率在真人口音下只会更差。
+#
+# 念的时候注意：
+#   - 按自然语速念，不要刻意放慢；停顿、口误、语气词都保留，那才是真实输入
+#   - 英文术语照常念（timeout 念 /ˈtaɪmaʊt/，docker compose 连读也行）
+#   - 读错、卡壳就重录，不要念一半停下来改口
+#
+# 每行一句，以 # 开头的是注释，空行忽略。
+
+帮我加一个 retry wrapper，最多重试三次，每次 backoff 两百毫秒，超过就把 error 打到 stderr。
+这个 PR 里的 handler 在 timeout 之后没有 release 连接，你 review 的时候重点看一下 defer 的位置。
+我在 staging 环境复现了，只要并发超过 50，redis 的连接池就会被打满，日志里全是 timeout。
+麻烦把这句 log 改成结构化输出，带上 request id 和 user id，方便在 kibana 里按 trace 过滤。
+嗯，那个，我想问一下这个接口为什么在 production 返回空，本地 docker compose 跑是正常的。
+迁移脚本要先加一个 nullable 的 column，回填完成之后再改成 not null，不然会锁表。
+这个 crash 只出现在 arm64 的机器上，x86 上没问题，怀疑是 alignment 或者 simd 的 bug。
+帮我把这段 SQL 加一个 index，字段是 tenant id 加 created at，查询走 range scan 会快很多。
+这个事情呢，我觉得可以先用 feature flag 灰度，先放百分之五的用户，观察一周再全量。
+CI 卡在 e2e 这一步，看起来是 headless chrome 启动失败，可能要加 no sandbox 参数。
+把 utils 里那个 helper 抽出来放到 common 包，记得同步更新 package json 里的依赖。
+我在本地用 pytest 跑是绿的，但是 GitHub Actions 上 flaky，大概三次里挂一次。
+这个页面首屏要两秒，LCP 太差了，先看看是不是字体文件阻塞了 render。
+记得给这个 endpoint 加 rate limit，不然有人刷接口会把数据库打挂。
+那个，就是说，这个方案我觉得还需要再讨论一下，主要是 rollback 的成本没算清楚。
+帮我写一段 release note，说明这次修了 memory leak，还有 webhook 重试的 off by one。
+数据库的 slow query 里有一条 update 没有走索引，看 explain 是全表扫描。
+这个 mock 数据不太对，created at 应该用 UTC，不然在跑测试的时候会时区漂移。
+我们下周要把 k8s 的版本升到 1.30，先确认一下 ingress controller 的兼容性。
+嗯那个，帮我把这个函数从 callback 改成 async await，顺便把 error handling 补上。

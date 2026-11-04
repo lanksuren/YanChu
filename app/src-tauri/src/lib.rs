@@ -191,6 +191,24 @@ pub fn run() {
         return;
     }
 
+    // 真人语料录制：录一段麦克风并写 wav，由 tools/record-corpus.ps1 逐句调用。
+    // 节奏和句子显示都在脚本里，这里只保证「录到的确实是声音」。
+    if let Some(idx) = args.iter().position(|a| a == "--record-wav") {
+        let out = args
+            .get(idx + 1)
+            .cloned()
+            .unwrap_or_else(|| "bench/real/tmp.wav".to_string());
+        let secs = args
+            .get(idx + 2)
+            .and_then(|s| s.parse::<f32>().ok())
+            .unwrap_or(8.0);
+        if let Err(e) = bench::record_wav(std::path::Path::new(&out), secs, 300) {
+            eprintln!("录音失败: {e}");
+            std::process::exit(1);
+        }
+        return;
+    }
+
     if args.iter().any(|a| a == "--models-json") {
         println!(
             "{}",
