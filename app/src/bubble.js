@@ -26,21 +26,31 @@ function applyUi(ui) {
   }
 }
 
-// 定稿的句子只在「比上次更长」时闪一下：整段替换（润色/定稿）不闪，
-// 否则每次状态切换都在闪，反而变成噪音。
+// 定稿的句子只在「比上次更长」时闪一下，而且**只闪新增的那几个字**。
+//
+// 以前是给整个 #committed 加背景高亮：一秒钟定稿三句就整块闪三下，
+// 读起来像屏幕在跳（2026-11-04 用户反馈「整体会闪好几下」）。
+// 现在把新增部分包成 <span class="fresh">，高亮范围就是那几个字。
 function setCommitted(text) {
-  const prev = committedEl.textContent || '';
-  const grew = text.length > prev.length && text.startsWith(prev);
-  committedEl.textContent = text;
-  if (!grew) return;
-  committedEl.classList.remove('fresh');
-  void committedEl.offsetWidth;
-  committedEl.classList.add('fresh');
-}
+  // 内容没变就别动 DOM：每 700ms 一次的空写入会掐断正在播放的高亮动画
+  if (text === committedEl.textContent) return;
 
-committedEl.addEventListener('animationend', (e) => {
-  if (e.animationName === 'commit-flash') committedEl.classList.remove('fresh');
-});
+  const prev = committedEl.dataset.text || '';
+  const grew = text.length > prev.length && text.startsWith(prev);
+  committedEl.dataset.text = text;
+
+  if (!grew) {
+    // 整段替换（润色/定稿）不闪：那是另一件事，闪起来只会变成噪音
+    committedEl.textContent = text;
+    return;
+  }
+
+  committedEl.textContent = text.slice(0, prev.length);
+  const added = document.createElement('span');
+  added.className = 'fresh';
+  added.textContent = text.slice(prev.length);
+  committedEl.appendChild(added);
+}
 
 function render({ kind, committed, tail, text, status }) {
   bubble.dataset.kind = kind;
@@ -49,7 +59,8 @@ function render({ kind, committed, tail, text, status }) {
   if (kind === 'polishing' || kind === 'deep') {
     // 润色中：文字留着，整体呼吸，表示还在处理
     setCommitted(committed || text || '');
-    tailEl.textContent = '';
+    // 尾巴**不清空**：松手那一刻灰字正说到一半，清掉会让人以为「刚才说的没了」。
+    // 气泡几百毫秒后整体退场，留着比突然消失更稳。
     // 文案由主进程给：长文自动切档要等 3–5 秒，和手动切档的一两秒不是一回事
     statusEl.textContent = status || (kind === 'deep' ? '深度整理中，可以等一两秒…' : '');
     syncOverflow();

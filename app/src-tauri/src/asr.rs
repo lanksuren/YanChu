@@ -389,7 +389,7 @@ impl Transcriber {
         let result = stream
             .get_result()
             .ok_or_else(|| anyhow::anyhow!("识别没有返回结果"))?;
-        Ok(result.text.trim().to_string())
+        Ok(sanitize(result.text.trim()))
     }
 
     /// 用 VAD 把整段录音切成句子，逐句识别。
@@ -450,10 +450,113 @@ impl Transcriber {
     }
 }
 
+/// 去掉 Qwen3-ASR 偶尔吐出来的控制标记。
+///
+/// 实测样本（2026-11-04 21:01 那条历史）：
+/// 「…状态怎么样。language Chinese<asr_text>啊，为什么灰字没了…」
+///
+/// 这是模型把内部的语言提示（`language Chinese`）和正文起点标记（`<asr_text>`）
+/// 当成正文输出了。不剥掉有两个看得见的后果：
+///
+/// 1. 这些字符原样落进用户的输入框；
+/// 2. 契约把 `Chinese` / `asr_text` 当英文术语，大润色一丢就判「丢了英文术语」，
+///    整次润色被丢弃 —— 用户白白多等一秒，还没润色成。
+///
+/// 剥法只认「标记」本身：尖括号里的 `<asr_text>` / `<|...|>`，
+/// 以及**紧挨在标记前面**的 `language Xxx`（它俩是同一段提示，必须一起走）。
+/// 所以正常说的「把 language 参数改成 zh」、代码里的 `Vec<T>` 都不会被动。
+pub fn sanitize(text: &str) -> String {
+    let chars: Vec<char> = text.chars().collect();
+    let mut out: Vec<char> = Vec::with_capacity(chars.len());
+
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i] == '<' {
+            let close = chars[i + 1..].iter().take(32).position(|c| *c == '>');
+            if let Some(off) = close {
+                let inner: String = chars[i + 1..i + 1 + off].iter().collect();
+                let special = (inner.starts_with('|') && inner.ends_with('|'))
+                    || inner.eq_ignore_ascii_case("asr_text");
+                if special {
+                    // 标记前面的「language Xxx」属于同一段提示，一起削掉
+                    trim_language_suffix(&mut out);
+                    i += off + 2;
+                    continue;
+                }
+            }
+        }
+        out.push(chars[i]);
+        i += 1;
+    }
+
+    // 万一没带尖括号，整句就是个 `language Chinese`，那也没有正文可留
+    if is_only_language(&out) {
+        out.clear();
+    }
+
+    // 删完之后可能留下连续空格：压成一个，收尾
+    let mut cleaned = String::with_capacity(text.len());
+    let mut last_space = false;
+    for c in out {
+        if c == ' ' || c == '\t' {
+            if !last_space {
+                cleaned.push(' ');
+                last_space = true;
+            }
+        } else {
+            cleaned.push(c);
+            last_space = false;
+        }
+    }
+    cleaned.trim().to_string()
+}
+
+/// 把结尾的 `language Xxx`（可能带前后空格）从缓冲里削掉。
+fn trim_language_suffix(out: &mut Vec<char>) {
+    let mut j = out.len();
+    while j > 0 && out[j - 1] == ' ' {
+        j -= 1;
+    }
+    let word_end = j;
+    while j > 0 && out[j - 1].is_ascii_alphabetic() {
+        j -= 1;
+    }
+    if j == word_end {
+        return; // 没有英文单词，不是这个标记
+    }
+    let word_start = j;
+    while j > 0 && out[j - 1] == ' ' {
+        j -= 1;
+    }
+    let lang_end = j;
+    let needle = "language";
+    if lang_end < needle.len() {
+        return;
+    }
+    let hit = out[lang_end - needle.len()..lang_end]
+        .iter()
+        .zip(needle.chars())
+        .all(|(a, b)| a.eq_ignore_ascii_case(&b));
+    if hit {
+        let _ = word_start;
+        out.truncate(lang_end - needle.len());
+    }
+}
+
+/// 整句是不是只剩一个 `language Xxx`
+fn is_only_language(out: &[char]) -> bool {
+    let text: String = out.iter().collect();
+    let text = text.trim();
+    let Some(rest) = text.strip_prefix("language").or_else(|| text.strip_prefix("Language")) else {
+        return false;
+    };
+    let rest = rest.trim_start();
+    !rest.is_empty() && rest.chars().all(|c| c.is_ascii_alphabetic())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn default_is_sensevoice() {
         let cfg = AsrConfig::default();
@@ -486,5 +589,42 @@ mod tests {
         }
         .normalized();
         assert_eq!(cfg.resolved_dir(), dir);
+    }
+
+    /// 2026-11-04 21:01 那条历史里漏出来的标记，必须整段消失
+    #[test]
+    fn strips_language_and_asr_text_markers() {
+        let raw = "好的，我现在可以测试一下这个状态怎么样。language Chinese<asr_text>啊，为什么灰字没了。";
+        let got = sanitize(raw);
+        assert!(!got.contains("language"), "got {got}");
+        assert!(!got.contains("asr_text"), "got {got}");
+        assert!(!got.contains('<'), "got {got}");
+        assert!(got.starts_with("好的"), "got {got}");
+        assert!(got.contains("啊，为什么灰字没了"), "got {got}");
+    }
+
+    /// 单独的 marker 也要能剥
+    #[test]
+    fn strips_bare_markers() {
+        assert!(!sanitize("前面<asr_text>后面").contains("asr_text"));
+        assert!(!sanitize("前面<|startoftranscript|>后面").contains("startoftranscript"));
+        assert_eq!(sanitize("language Chinese"), "");
+    }
+
+    /// 正常文本里的尖括号和 language 不能被误伤
+    #[test]
+    fn keeps_normal_angle_brackets() {
+        assert_eq!(
+            sanitize("返回类型是 Vec<T>，别写成 <div>"),
+            "返回类型是 Vec<T>，别写成 <div>"
+        );
+        assert_eq!(
+            sanitize("把这个 language 参数改成 zh"),
+            "把这个 language 参数改成 zh"
+        );
+        assert_eq!(
+            sanitize("the language Python is easy"),
+            "the language Python is easy"
+        );
     }
 }

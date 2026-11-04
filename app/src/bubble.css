@@ -65,8 +65,9 @@ body {
 #committed { color: var(--fg); }
 #tail { color: var(--tail); }
 
-/* 新定稿一句：一次很轻的高亮，告诉用户「这句已经锁定了」 */
-#committed.fresh {
+/* 新定稿一句：只高亮新出现的那几个字（见 bubble.js 的 setCommitted）。
+   高亮整段会让「一次说话里多次定稿」看起来像整块屏幕在闪。 */
+#committed .fresh {
   border-radius: 3px;
   animation: commit-flash var(--dur-slow) var(--ease-out);
 }
@@ -81,13 +82,15 @@ body {
 
 #bubble[data-kind="error"] { color: var(--warn); }
 
-/* 润色中：文字保持，整体轻微呼吸，配合指示器的旋转 */
+/* 润色中：文字只降一档颜色，**不做循环呼吸**。
+   以前这里挂的是 `polish-breathe 1.4s infinite`，整段字每秒明暗一次，
+   在松手后等润色的 0.5–2 秒里就是「文字一直在闪」。
+   进度感交给指示器上的转圈，文字保持不动。 */
 #bubble[data-kind="polishing"] #committed {
   color: var(--text-muted);
-  animation: polish-breathe 1.4s ease-in-out infinite;
 }
 
-/* 深度整理：文字淡一档，底下多一行提示 */
+/* 深度整理：文字同样只降色，底下多一行提示 */
 #bubble[data-kind="deep"] #committed {
   color: var(--text-muted);
 }
