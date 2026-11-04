@@ -1,71 +1,135 @@
-# Qwen3-ASR 0.6B 延迟优化方案
+# Qwen3-ASR 0.6B 延迟优化方案（含实测）
 
-> 日期：2026-11-04
-> 背景：`models/asr.json` 已切到 `qwen3`，实际体感比 SenseVoice Small 慢。本文回答「慢在哪、怎么改」，并按性价比排序。
-> 依据：本仓库代码（行号对应 2026-11-04 的 HEAD）、`bench/ASR-COMPARISON.md` 的实测数、`docs/产品定义-v2.md` 的延迟预算。
+> 日期：2026-11-04（P0/P1 已落地）
+> 背景：`models/asr.json` 切到 `qwen3` 后体感比 SenseVoice Small 慢。
+> 机器：Intel Core Ultra 5 338H（12 核 12 线程）+ Arc B370 核显（24G 共享显存），Windows。
+> 口径：文中所有数字都是本机实测，不是估算；复现命令见文末。
 
-## 一、账面数字 vs 端到端
+## 一、结论先说
 
-| 口径 | SenseVoice Small | Qwen3-ASR 0.6B |
+1. **慢的不是「离线编码器做流式」这件事**。既有管线已经把定稿段固定下来，只重算尾巴，计算量不随流增长。
+2. **Qwen3 单次解码的真实成本**：`143ms + 69ms × 音频秒数`（4 线程）。其中 encoder 占 41ms/秒，decoder 约 10ms/字，固定开销 ~160ms/次。
+3. **松手 → 出字 的构成变了**：ASR 定稿只占 ~300ms，**大润色（LLM）占 500–1100ms**。Qwen3 时代 800ms 预算的瓶颈已经从 ASR 转移到润色。
+4. 能靠调度拿回来的那一部分已经拿了：**P95 1172 → 970ms**，定稿解码从 205–511ms 收敛到 185–201ms。
+5. 剩下的路只有三条：**增量大润色**（收益最大，不属 ASR）、**GPU（DirectML）**、或者**回 SenseVoice 上屏 + Qwen3 后台定稿**。
+
+## 二、P0：把一次解码拆成三块
+
+`yanchu.exe --bench-lat <wav>`（新增，见 `app/src-tauri/src/bench_lat.rs`）。
+同一段音频取 1/2/4/6/8/12/16s 前缀，分别解「真人说话」和「等长静音」：
+静音那次的 encoder 成本一样、decoder 只出 1 个 token，于是两组的斜率差就是 decoder。
+
+| 音频长度 | 说话 | 静音 | 差值 | 字数 |
+|---:|---:|---:|---:|---:|
+| 1s | 239ms | 215ms | 24ms | 3 |
+| 2s | 294ms | 250ms | 44ms | 3 |
+| 4s | 417ms | 350ms | 67ms | 9 |
+| 6s | 517ms | 430ms | 87ms | 17 |
+| 8s | 671ms | 494ms | 177ms | 20 |
+| 12s | 1009ms | 671ms | 338ms | 32 |
+| 16s | 1258ms | 837ms | 421ms | 41 |
+
+拟合：
+
+```text
+说话: 143ms + 69ms/秒
+静音: 174ms + 41ms/秒   ← encoder
+```
+
+**判读**：encoder 是斜率的大头（41/69 ≈ 59%），固定开销 143–174ms 占短句成本的三分之一。
+所以「缩短要解码的音频」和「减少解码次数」是两个独立的钱袋，都得管。
+
+### 线程数：4 是对的，别加
+
+| threads | 截距 | 每秒斜率 |
+|---:|---:|---:|
+| 2 | 187ms | 91ms |
+| **4** | **170ms** | **71ms** |
+| 6 | 454ms | 55ms |
+| 8 | 703ms | 79ms |
+
+4 线程以上截距暴涨（混合架构把线程甩到 E 核，每个算子的 barrier 等最慢那根）。
+`default_threads()` 的 `min(核数, 4)` 已经是最优，不用改；`YANCHU_ASR_THREADS` 别乱调。
+
+## 三、P1：调度层（已落地，commit `perf: 流式识别调度按模型分档`）
+
+三处改动：
+
+1. **刷新间隔自适应**：`间隔 = clamp(1.15 × 上一拍解码耗时, 地板, 1500ms)`。
+   Qwen3 地板 700ms（450ms 时只是多烧 25% CPU，延迟一点没变），SenseVoice 仍 450ms。
+2. **尾巴上限按模型分档**：Qwen3 6s（12s 尾巴一次要 ~1s），SenseVoice 保持 12s。
+3. **尾巴没语音就不解码**：切点落在静音末尾，刚定稿完那 0.2–0.5s 的尾巴
+   以前会白跑一次 ~200ms 解码，拿到「。」再被丢掉。
+
+### 端到端效果（`tools/lat-bench.ps1`，03.wav 11.4s，各 4 次）
+
+| | 改前 | 改后 |
 |---|---:|---:|
-| 单次 decode（约 6.7s 音频，CPU 4 线程） | 92ms P50 / 133ms P95 | 946ms P50 / 1207ms P95 |
-| 单段最高值（产品定义 v2 记为 1131ms） | — | ~1.1s |
-| 产品预算：松手 → 文字出现 | P95 ≤ 800ms | 单次 decode 就已击穿 |
-| 产品预算：句末 → 气泡更新 | ≤ 300ms | 灰字必然落后 |
+| 松手→出字 P50 | 988ms | **907ms** |
+| 松手→出字 P95 | 1172ms | **970ms** |
+| 定稿解码 | 205–511ms | **185–201ms** |
+| 识别总耗时（11.4s 音频） | 6.8s | 7.1s |
+| 大润色 | 515ms | 544ms |
 
-**关键认知**：946ms 只是「一次 decode」的账面成本。端到端体感 = 账面成本 × 排队 × 重算次数，Qwen3 在这三项上全都被放大。所以用户感觉到的差距大于 9.6×，也小于「模型参数量必然如此」。
+识别总耗时没降反升一点，是因为定稿解码变短了、整体更稳 —— 用 CPU 换确定性，值得。
 
-## 二、瓶颈不在「用离线编码器做流式」，在这三处
+### 长口述（34s 拼接口述，2 次）
 
-### 1. 单把互斥锁 + 饱和的 tick（最大头）
+| | 改前 | 改后 |
+|---|---:|---:|
+| 松手→出字 P50 | 1600ms | 1698ms |
+| 大润色 | 1094ms | 1118ms |
+| 识别总耗时 | 19.5s | 22.2s |
 
-- `streaming_loop` 每 `PARTIAL_INTERVAL = 450ms`（`app/src-tauri/src/lib.rs:98`）跑一次；
-  Qwen3 单次 decode 946–1131ms → **占空比 > 100%**，循环永远在 decode 里，灰字永远落后 1–2s。
-- `transcribe()` 全程持有 `transcriber` 的互斥锁（`lib.rs:1468-1478`）。松手时 `finish()` 的定稿 decode
-  **必须排在正在跑的尾巴 decode 后面**；最坏情况那条尾巴是 12s 音频（约 2s）。
-- 结果：松手 → 出字 ≈ 排队等待（0–2s）+ 定稿 decode（0.9–2s）+ 润色落字（~0.1s）。
+长口述**没有变好，略差一点**（在噪声范围内，主要被 1.1s 的大润色淹没）。
+6s 尾巴上限让它多切了两刀（9 → 11 次提交），换来的是单次解码有界。
+如果哪天觉得长口述的字跳得厉害，`YANCHU_TAIL_SECS=12` 就回到旧行为。
 
-### 2. 尾巴上限 12s 对 0.6B 太宽松
+## 四、钱花在哪：一次「松手」的账
 
-`MAX_TAIL_SAMPLES = 192_000`（12s，`lib.rs:101-105`）、`FORCED_COMMIT_SAMPLES = 160_000`（10s）。
-encoder 成本随音频长度线性、decoder 成本随 token 数线性 → 12s 尾巴一次 ≈ 6s 尾巴两次的价钱，
-却只换来一次更旧的灰字。SenseVoice 时代 12s 无所谓（92ms），Qwen3 时代它是主要成本项。
+11.4s 的一次口述（P50）：
 
-### 3. 断点要等满 500ms 静音才开始 decode
+```text
+松手 → 定稿解码 185-201ms → 大润色 544ms → 写入 25ms → 出字
+        ^^^^^^^^^^^^^^^^      ^^^^^^^^^^
+        31%                   55%
+```
 
-`find_commit_point` 要求 5 个静音帧（`lib.rs:837-874`）才返回切点，之后才开始 decode。
-这 500ms 是纯等待 —— 静音一旦确认，`[committed_end..silence_start]` 的音频已经齐了，可以提前开跑。
+34s 的长口述：定稿 386ms + 大润色 1118ms + 写入 25ms。
 
-## 三、对检索到的那份回答的核对
+**ASR 已经不是主要矛盾了。** 继续抠 ASR 调度最多再省几十毫秒；
+要进 800ms，得动大润色（产品定义 v2 里写的「增量大润色」）——
+每句闭合就把该句+上文润好缓存，松手时只润最后一句，500ms 能降到 100–200ms。
 
-| 那条建议 | 核对结果 | 对你的结论 |
-|---|---|---|
-| 换 `qfuxa/qwen3-asr-0.6b-streaming` 因果塔是「首选」 | 仓库真实存在，但**英文专用**：FLEURS zh CER 11.4 → 85.7（蒸馏只在英文上做）；CPU 只有 fp32 路径 RTF 0.82，而你现在 int8 ONNX 是 0.139；运行时是 Python/torch，sherpa-onnx 没有对应 ONNX 导出 | **负优化**。中文明细度会崩，CPU 上反而慢 6 倍，且等于换引擎不是换权重 |
-| vLLM 128 并发 2000× 吞吐、TTFT 92ms | 数字是真的 | 单流本地用不上，是服务端吞吐优化 |
-| `huanglizhuo/QwenASR` 纯 Rust 引擎，46× 实时 | 项目真实；46× 是 Apple M5 Pro 上 NEON/Accelerate/AMX 的成绩 | Windows x64 走无 BLAS 路径，倍数不可预期；但它自带 `--stream`，值得抽半天用你的 20 条语料量一次 |
-| 「9.2× 差距」「WER 20.8 vs 18.1」「计算量低 3–4 倍」 | 数字分别来自本仓库的 9.6× 对比和该项目的英文评测 | 别当独立结论用，口径不同 |
+## 五、还剩哪些路
 
-它的**方向**（低延迟要换范式）对，但**结论**（换因果塔）只对英文+GPU 成立。你的约束是中文、Windows CPU、单流、800ms。
+| 方案 | 预期 | 代价 | 建议 |
+|---|---|---|---|
+| **增量大润色**（缓存每句润色结果，松手只跑最后一句） | 松手延迟 −350～900ms，直接进 800ms | 产品定义 v2 已经写好，属实现欠账 | **优先做**，比 ASR 优化的收益大一个量级 |
+| **GPU（DirectML / Arc B370）** | 单次解码 3–5×，长口述的单次 1s → 0.2–0.3s；CPU 也让出来给 LLM | 要自建 sherpa-onnx + ONNX Runtime DirectML（Rust crate 只发 CPU 预编译包，见 `target/sherpa-onnx-prebuilt/…win-x64-static-MT-Release`），再用 `SHERPA_ONNX_LIB_DIR` 指过去；1–2 周 | 长口述/多任务场景值得试 |
+| **双模型：SenseVoice 出灰字 + Qwen3 定稿** | 灰字延迟回到 90ms 级；定稿仍要等 Qwen3 | 定稿替换灰字会有一次可见改写；两套模型常驻内存 | 只有在「灰字要跟上说话」是硬指标时才做 |
+| **换因果流式塔 `qfuxa/qwen3-asr-0.6b-streaming`** | 英文+GPU 下 RTF 0.16 | **英文专用**（FLEURS 中文 CER 11.4→85.7）；CPU 只有 fp32，RTF 0.82，比现在慢 6 倍；Python 运行时 | **不要用**，对中文是负优化 |
+| 换纯 Rust 引擎 `huanglizhuo/QwenASR` | Apple Silicon 上 46× 实时 | 优化针对 NEON/Accelerate/AMX，Windows 走无 BLAS 路径，倍数不可预期 | Windows 上收益未验证，别抱期待 |
 
-## 四、方案
+## 六、复现命令
 
-| 级别 | 做什么 | 改哪里 | 预期（估算） | 风险 |
-|---|---|---|---|---|
-| **P0** 量化拆分（0.5 天） | 同一段语音裁 1/2/4/8/12s 各跑一次，线性拟合出「每秒音频成本」和「每 token 成本」；devlog 的 `note_asr` 加 `queue_wait_ms` | `bench.rs` 加 `--bench-lat`，`devlog.rs:502` | 判断瓶颈在 encoder 还是 decoder，决定后面走哪条路 | 无 |
-| **P1** 调度层（1–2 天，精度无损） | ① 自适应 tick：`next = clamp(1.15 × 实测, 450ms, 1500ms)`；② 尾巴上限按模型分档（qwen3=6s，sensevoice=12s）；③ 松手优先：`AtomicBool release_pending` + 尾巴 decode 用 `try_lock`，松手后直接跳过；④（可选）静音满 200ms 就 speculative 定稿 decode，500ms 判定过了才采用 | `lib.rs:884-1043`、`lib.rs:101-105`、`lib.rs:1468` | 排队从「几乎必然」降到「约一半」，尾巴成本减半：P50 1.5s→~1.0s，P95 2.5s→~1.3s | 低；灰字刷新变慢（1.1s 一次），需看是否可接受 |
-| **P2** 结构层（2–3 天，唯一能进 800ms 的低风险路线） | 就是产品定义 v2 已定的「灰字低延迟 + 定稿高精度」：灰字走 SenseVoice（92ms）或真流式 zipformer（sherpa-onnx 原生 online API），定稿才用 Qwen3；松手时若尾巴已在停顿处定稿，则零 decode | `asr.rs` 加第二识别器，`lib.rs` 灰字/定稿分流，`stream.rs` 吸收替换 | P95 ≤ 800ms 可达；术语保留率 96% 保留在定稿上 | 中；定稿替换灰字时会有一次可见改写，需在 `Streamer` 的 soft 区收口 |
-| **P3** 硬件层（1–2 周） | sherpa-onnx 的 Rust crate 只发 CPU 预编译包（`target/sherpa-onnx-prebuilt/…-win-x64-static-MT-Release`），要 GPU 得自建 sherpa-onnx + ONNX Runtime DirectML/CUDA，再用 `SHERPA_ONNX_LIB_DIR` 指过去；同时扫 threads 4→8/12、int8 vs fp32、自建 ORT 开 AVX512-VNNI | 构建链，不动业务代码 | 有独显时 0.6B decoder 通常 3–6×，是唯一能把 Qwen3 压进 800ms 的路 | 高；构建成本大 |
+```powershell
+# 拆 encoder / decoder 成本（7 档长度 × 说话/静音，约 1 分钟）
+app\src-tauri\target\debug\yanchu.exe --bench-lat bench\corpus\03.wav
 
-## 五、不建议
+# 端到端「松手 → 出字」分布（起假目标窗口 + wav 冒充麦克风，跑 N 次）
+powershell -ExecutionPolicy Bypass -File tools\lat-bench.ps1 -Runs 4
+powershell -ExecutionPolicy Bypass -File tools\lat-bench.ps1 -Runs 2 -Wav tools\.lat-long.wav
 
-- **自训中文因果塔**：这是研究项目（要重训音频塔 + 蒸馏 + 导出 ONNX），不是两周的优化。
-- **为了 Qwen3 把预算放宽到 1.5s**：先做 P2，它证明过可行（产品定义 v2 的模型组合一行）。
-- **直接把 `qfuxa` 塔接进来**：中文会崩，见第三节。
+# 扫调度参数（不重编译）
+$env:YANCHU_TICK_MS = "700"; $env:YANCHU_TAIL_SECS = "6"
+```
 
-## 六、验收门
+> `tools\.lat-long.wav`（34s）是本机拼出来的一次性素材（corpus 的 03+01+02 直接接 PCM），
+> 没进仓库；要重做就用同样的办法拼一段 30s 以上的口述。
 
-| 阶段 | 门 | 怎么量 |
-|---|---|---|
-| P1 后 | `release_to_text_ms` P95 ≤ 1.3s（Qwen3 档） | devlog 已有该字段，跑 20 次真实口述 |
-| P2 后 | P95 ≤ 800ms，且灰字到气泡 ≤ 300ms | 同上 |
-| 每一步 | CER / 术语保留率不退化 | `yanchu.exe --bench bench\corpus` 对比基线（Qwen3: 3.7% / 93%） |
+## 七、注意
+
+- 语料是 Windows TTS 合成的，比真人干净；真人录音下 decoder 的 token 数会变，`ms/字` 要重测。
+- 大润色跑的是本地 Ollama（qwen3.5:2b），耗时随文本长度线性涨：11.4s 口述 544ms，34s 口述 1118ms。
+- 端到端样本量小（各 2–4 次），P95 的置信区间不宽；要更硬的结论就加到 10 次以上。
