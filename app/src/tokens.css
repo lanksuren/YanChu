@@ -1,0 +1,77 @@
+/* 共用设计令牌：时长 / 缓动 / 圆角。
+   三个窗口（控制面板、气泡、指示器）都引这一份，避免每个文件各写一套毫秒数。
+
+   用法约定：
+   - 只动 transform / opacity，不动 width / height / top / left；
+   - 单次过渡不超过 --dur-base，除非是一次性的确认动画（--dur-slow）；
+   - 需要「弹一下」的小元素才用 --ease-spring，浮层不要用。 */
+
+:root {
+  --dur-instant: 80ms;   /* 按压、hover */
+  --dur-fast: 160ms;     /* 控件、颜色、状态切换 */
+  --dur-base: 220ms;     /* 浮层进出、页签 */
+  --dur-slow: 320ms;     /* 一次性确认动画 */
+
+  --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+
+  --radius-card: 12px;
+  --radius-control: 8px;
+
+  /* 语义色：浅色 */
+  --surface: #f6f7f9;
+  --surface-raised: #ffffff;
+  --text: #111827;
+  --text-muted: #5b6472;
+  --border: #e5e7eb;
+  --accent: #2563eb;
+  --ok: #059669;
+  --warn: #d97706;
+  --danger: #dc2626;
+  --polish: #7c3aed;
+  --bubble-bg: rgba(255, 255, 255, 0.88);
+  --bubble-border: rgba(255, 255, 255, 0.55);
+  --bubble-shadow: 0 6px 20px rgba(15, 23, 42, 0.13), 0 1px 2px rgba(15, 23, 42, 0.06);
+}
+
+/* 跟随系统深色。三个窗口共用同一套值。 */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --surface: #16181d;
+    --surface-raised: #1e2127;
+    --text: #e5e7eb;
+    --text-muted: #9ca3af;
+    --border: #2b3038;
+    --accent: #60a5fa;
+    --ok: #34d399;
+    --warn: #fbbf24;
+    --danger: #f87171;
+    --polish: #a78bfa;
+    --bubble-bg: rgba(24, 26, 32, 0.9);
+    --bubble-border: rgba(255, 255, 255, 0.08);
+    --bubble-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  }
+}
+
+/* 系统开了「减少动态效果」：关掉循环动画和位移，只留极短的淡入。 */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* 手动降级：YANCHU_REDUCED_MOTION=1 时由前端给 html 加这个类。 */
+html.reduced-motion *,
+html.reduced-motion *::before,
+html.reduced-motion *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+  scroll-behavior: auto !important;
+}

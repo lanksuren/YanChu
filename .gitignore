@@ -1,0 +1,37 @@
+# 构建产物
+target/
+dist/
+gen/
+
+# 依赖
+node_modules/
+
+# 模型（各 200MB 起，不进仓库，用 bench 里的脚本按需下载）
+app/src-tauri/models/
+
+# sherpa-onnx 预编译库（117MB，用 tools/fetch-chunked.ps1 下载）
+app/src-tauri/.cache/
+
+# 验收语料（合成出来的，可随时重建）
+bench/corpus/
+bench/ablation-en/
+
+# 运行期产物
+*.log
+.err.txt
+app/src-tauri/.target-app.exe
+spike/.target-app.exe
+spike/.target-dump.txt
+tools/.e2e-target.exe
+tools/.e2e-dump.txt
+tools/.e2e-app.log
+
+# 开发模式采集（音频 + 录音日志，只在本地留着分析用）
+devlog/
+.devlog-*/
+
+# 编辑器
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

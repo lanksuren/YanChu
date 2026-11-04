@@ -1,0 +1,171 @@
+/* 跟随鼠标的录音指示器。
+   四层叠加：
+     halo    外圈柔光，跟着音量放大
+     ring    音量环，实时反映说话大小
+     core    实心圆点，颜色表示状态
+     spinner 润色时的旋转弧线
+   尺寸 72x72，实际视觉直径约 44px。 */
+
+/* 颜色取自 tokens.css，跟着系统深浅色一起变。 */
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  overflow: hidden;
+  pointer-events: none;
+  user-select: none;
+}
+
+#orb {
+  position: relative;
+  width: 72px;
+  height: 72px;
+  display: grid;
+  place-items: center;
+}
+
+#orb > div {
+  position: absolute;
+  border-radius: 50%;
+  will-change: transform, opacity;
+}
+
+/* 柔光：音量越大越大越亮 */
+#halo {
+  width: 44px;
+  height: 44px;
+  background: radial-gradient(circle, rgba(37, 99, 235, 0.35) 0%, rgba(37, 99, 235, 0) 70%);
+  transform: scale(1);
+  opacity: 0.25;
+  transition: transform var(--dur-instant) var(--ease-out), opacity var(--dur-instant) var(--ease-out);
+}
+
+/* 音量环 */
+#ring {
+  width: 40px;
+  height: 40px;
+  border: 2px solid rgba(37, 99, 235, 0.85);
+  opacity: 0.35;
+  transition: transform var(--dur-instant) var(--ease-out), opacity var(--dur-instant) var(--ease-out), border-color var(--dur-fast) ease;
+}
+
+/* 实心点 */
+#core {
+  width: 12px;
+  height: 12px;
+  background: var(--accent);
+  transition: transform var(--dur-instant) var(--ease-out), background var(--dur-fast) ease;
+}
+
+/* 润色旋转弧 */
+#spinner {
+  width: 44px;
+  height: 44px;
+  border: 2px solid transparent;
+  border-top-color: var(--polish);
+  border-right-color: rgba(124, 58, 237, 0.35);
+  opacity: 0;
+  transform: rotate(0deg);
+  transition: opacity var(--dur-fast) var(--ease-out);
+}
+
+/* 完成时画的勾 */
+#check {
+  position: absolute;
+  width: 22px;
+  height: 22px;
+  fill: none;
+  stroke: var(--ok);
+  stroke-width: 2.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-dasharray: 24;
+  stroke-dashoffset: 24;
+  opacity: 0;
+}
+
+/* ---- 状态 ---- */
+
+/* 刚开始，还没收到电平：环常亮，先不呼吸 */
+#orb[data-state="listening"] #ring { opacity: 0.55; }
+
+/* 在听但没声音：慢呼吸，让用户知道还在录 */
+#orb[data-state="silent"] #core { animation: breathe 1.8s ease-in-out infinite; }
+#orb[data-state="silent"] #ring { opacity: 0.2; }
+
+/* 有声音：核心变亮，环跟着 level 放大（由 JS 驱动） */
+#orb[data-state="speaking"] #ring { opacity: 0.85; }
+#orb[data-state="speaking"] #core { background: #1d4ed8; }
+
+/* 润色中：旋转 */
+#orb[data-state="polishing"] #spinner { opacity: 1; animation: spin 900ms linear infinite; }
+#orb[data-state="polishing"] #core { background: var(--polish); }
+#orb[data-state="polishing"] #ring { opacity: 0.15; }
+#orb[data-state="polishing"] #halo { opacity: 0.18; }
+
+/* 完成：绿底 + 白勾，环收一下 */
+#orb[data-state="done"] #core {
+  width: 24px;
+  height: 24px;
+  background: var(--ok);
+  animation: core-pop var(--dur-base) var(--ease-spring);
+}
+#orb[data-state="done"] #ring {
+  border-color: rgba(5, 150, 105, 0.8);
+  opacity: 0.6;
+  animation: done-ring var(--dur-slow) var(--ease-out);
+}
+#orb[data-state="done"] #check {
+  width: 24px;
+  height: 24px;
+  stroke: #fff;
+  opacity: 1;
+  animation: check-draw 220ms var(--ease-out) both;
+}
+
+/* 提示 */
+#orb[data-state="notice"] #core { background: var(--warn); }
+#orb[data-state="notice"] #ring { border-color: rgba(217, 119, 6, 0.7); opacity: 0.5; }
+
+/* 空闲：基本不显示 */
+#orb[data-state="idle"] { opacity: 0; }
+
+/* 进场 / 退场：由 Rust 的 shown / hiding 事件加类触发 */
+#orb.entering { animation: orb-in var(--dur-base) var(--ease-out) both; }
+#orb.leaving { animation: orb-out 120ms var(--ease-in-out) both; }
+
+@keyframes breathe {
+  0%, 100% { transform: scale(1); opacity: 0.9; }
+  50% { transform: scale(0.72); opacity: 0.45; }
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes check-draw {
+  from { stroke-dashoffset: 24; }
+  to   { stroke-dashoffset: 0; }
+}
+
+@keyframes done-ring {
+  0%   { transform: scale(1.12); opacity: 0.9; }
+  100% { transform: scale(1); opacity: 0.6; }
+}
+
+@keyframes core-pop {
+  from { transform: scale(0.6); }
+  to   { transform: scale(1); }
+}
+
+@keyframes orb-in {
+  from { opacity: 0; transform: scale(0.9); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+@keyframes orb-out {
+  to { opacity: 0; transform: scale(0.94); }
+}

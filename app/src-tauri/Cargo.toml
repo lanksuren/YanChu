@@ -1,0 +1,48 @@
+[package]
+name = "yanchu"
+version = "0.1.0"
+description = "言出 —— 按住说话，落成整理好的文字"
+edition = "2021"
+rust-version = "1.77"
+
+[lib]
+name = "yanchu_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon", "image-png"] }
+tauri-plugin-single-instance = "2"
+tauri-plugin-notification = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
+cpal = "0.16"
+hound = "3.5"
+arboard = "3"
+log = "0.4"
+env_logger = "0.11"
+ureq = { version = "2", features = ["json"] }
+
+# ASR 单独用 feature 关着：先把「热键 → 采集 → 落字 → 气泡」这条链路编译通过，
+# 再接模型。这样第一次 cargo build 不会被 300MB 的模型和 C++ 依赖拖住。
+sherpa-onnx = { version = "2.0.1", optional = true, default-features = false, features = ["static"] }
+pinyin = "0.11"
+
+[features]
+default = []
+asr = ["dep:sherpa-onnx"]
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.61", features = [
+  "Win32_Foundation",
+  "Win32_Graphics_Gdi",
+  "Win32_UI_WindowsAndMessaging",
+  "Win32_UI_Input_KeyboardAndMouse",
+  "Win32_System_Threading",
+  "Win32_System_LibraryLoader",
+  "Win32_System_SystemInformation",
+  "Win32_System_Console",
+] }

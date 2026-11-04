@@ -1,0 +1,148 @@
+/* 底部气泡。
+   窗口比卡片大一圈：四周留 20px 透明边距，卡片的外投影才有地方落，
+   否则阴影会在窗口边界被硬生生切出一条直线 —— 那就是「看得出矩形」的来源。
+   所以：html/body 不能有任何背景，卡片也不能贴边。 */
+
+:root {
+  --card: var(--bubble-bg);
+  --fg: var(--text);
+  --tail: var(--text-muted);
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  /* 连 UA 默认背景一起干掉，任何一点底色都会在圆角外露出来 */
+  background: transparent !important;
+  overflow: hidden;
+  user-select: none;
+  pointer-events: none;
+  font-family: "Microsoft YaHei UI", "PingFang SC", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* 这一圈留白是给投影的，别改小 */
+body {
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding: 20px;
+}
+
+#bubble {
+  position: relative;
+  width: 100%;
+  max-height: 100%;
+  padding: 10px 14px;
+  border-radius: var(--radius-card, 12px);
+  background: var(--card);
+  border: 1px solid var(--bubble-border, rgba(255, 255, 255, 0.55));
+  box-shadow: var(--bubble-shadow, 0 6px 20px rgba(15, 23, 42, 0.13));
+  color: var(--fg);
+  font-size: var(--bubble-font, 11px);
+  line-height: 1.5;
+  letter-spacing: 0.2px;
+  overflow: hidden;
+  word-break: break-word;
+  /* 底部对齐：内容长了从**顶部**溢出，最新一行永远贴着下沿 */
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+}
+
+#text { display: block; }
+
+/* 顶部被裁掉时给一条渐隐，免得看到半截字 */
+#bubble.clipped #text {
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 16px);
+  mask-image: linear-gradient(to bottom, transparent 0, #000 16px);
+}
+
+#committed { color: var(--fg); }
+#tail { color: var(--tail); }
+
+/* 新定稿一句：一次很轻的高亮，告诉用户「这句已经锁定了」 */
+#committed.fresh {
+  border-radius: 3px;
+  animation: commit-flash var(--dur-slow) var(--ease-out);
+}
+
+@keyframes commit-flash {
+  from { background: rgba(37, 99, 235, 0.16); }
+  to   { background: transparent; }
+}
+
+/* 状态行：平时不占高度，只在深度整理时出现 */
+#status { display: none; }
+
+#bubble[data-kind="error"] { color: var(--warn); }
+
+/* 润色中：文字保持，整体轻微呼吸，配合指示器的旋转 */
+#bubble[data-kind="polishing"] #committed {
+  color: var(--text-muted);
+  animation: polish-breathe 1.4s ease-in-out infinite;
+}
+
+/* 深度整理：文字淡一档，底下多一行提示 */
+#bubble[data-kind="deep"] #committed {
+  color: var(--text-muted);
+}
+
+#bubble[data-kind="deep"] #status {
+  display: block;
+  margin-top: 2px;
+  color: var(--text-muted);
+  font-size: 11px;
+  letter-spacing: 0.1px;
+  animation: polish-breathe 1.6s ease-in-out infinite;
+}
+
+@keyframes polish-breathe {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 1; }
+}
+
+/* 进场 / 退场。
+   窗口是 show()/hide() 瞬时的，纯 CSS 入场会在页面加载（仍是隐藏状态）时就跑完，
+   所以由 Rust 的 shown / hiding 事件给 #bubble 加类触发。 */
+#bubble.entering { animation: bubble-in var(--dur-base) var(--ease-out) both; }
+#bubble.leaving { animation: bubble-out 120ms var(--ease-in-out) both; }
+
+@keyframes bubble-in {
+  from { opacity: 0; transform: translateY(6px) scale(0.97); }
+  to   { opacity: 1; transform: none; }
+}
+
+@keyframes bubble-out {
+  to { opacity: 0; transform: translateY(4px); }
+}
+
+/* 定稿：一次绿色描边脉冲，告诉用户「这句已经落下去了」。
+   放在 ::after 上，避免和进场/退场的 animation 抢同一个属性。 */
+#bubble::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  opacity: 0;
+}
+
+#bubble[data-kind="done"]::after {
+  animation: done-pulse var(--dur-slow) var(--ease-out);
+}
+
+@keyframes done-pulse {
+  0% {
+    opacity: 1;
+    box-shadow: inset 0 0 0 1px rgba(5, 150, 105, 0.55), 0 0 0 0 rgba(5, 150, 105, 0.28);
+  }
+  100% {
+    opacity: 0;
+    box-shadow: inset 0 0 0 1px rgba(5, 150, 105, 0), 0 0 0 8px rgba(5, 150, 105, 0);
+  }
+}
