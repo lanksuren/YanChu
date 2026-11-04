@@ -28,7 +28,7 @@ mod ui;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Mutex;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use tauri::{AppHandle, Emitter, Manager};
 
@@ -95,8 +95,18 @@ fn warmup_done(app: &AppHandle) {
     }
 }
 
-/// 实时识别的节奏。太快会让 CPU 一直跑满，太慢用户会觉得卡住。
-const PARTIAL_INTERVAL: Duration = Duration::from_millis(450);/// 少于这个长度不值得跑一次识别
+/// 实时识别的节奏下限。太快会让 CPU 一直跑满，太慢用户会觉得卡住。
+/// 上限由实测解码耗时决定 —— 见 `streaming_loop` 里的自适应间隔。
+const PARTIAL_INTERVAL_MIN: Duration = Duration::from_millis(450);
+const PARTIAL_INTERVAL_MAX: Duration = Duration::from_millis(1500);
+
+/// Qwen3 的最短刷新间隔（700ms）。
+///
+/// 450ms 一拍时，一次 ~330ms 的尾巴解码占掉 73% 的核，而「松手→出字」
+/// 实测并没有变快（450ms 拍 1063ms vs 700ms 拍 1062ms，见 docs/ASR-延迟优化方案.md）——
+/// 多花的只是 CPU。所以对贵模型把地板抬高，省下来的算力留给定稿解码。
+const PARTIAL_INTERVAL_QWEN3: Duration = Duration::from_millis(700);
+/// 少于这个长度不值得跑一次识别
 const PARTIAL_MIN_SAMPLES: usize = 12_800; // 0.8s @16k
 
 /// 一直不停顿时，最多攒这么长的音频就必须切一刀（12s）。
@@ -104,6 +114,20 @@ const PARTIAL_MIN_SAMPLES: usize = 12_800; // 0.8s @16k
 const MAX_TAIL_SAMPLES: usize = 192_000;
 /// 强制切段时优先落在这么长的位置之前（10s）
 const FORCED_COMMIT_SAMPLES: usize = 160_000;
+
+/// Qwen3 的尾巴上限（6s）。
+///
+/// `--bench-lat` 实测它每次解码约 143ms + 69ms/秒音频（Ultra 5 338H、4 线程），
+/// 12s 尾巴一次要 ~1s；SenseVoice 同样 12s 只要 ~90ms。
+/// 判据是「花的钱和买到的灰字相称」：Qwen3 不该攒 12 秒再解。
+const MAX_TAIL_SAMPLES_QWEN3: usize = 96_000;
+const FORCED_COMMIT_SAMPLES_QWEN3: usize = 80_000;
+
+/// 尾巴里连一帧像样的声音都没有时就不解码。
+///
+/// 切点落在静音末尾，所以刚定稿完的那 0.2–0.5 秒尾巴必然是静音；
+/// 以前会为它白跑一次 200ms 左右的解码，拿到「。」再被 `has_content` 丢掉。
+const TAIL_SILENCE_RMS: f32 = 0.008;
 
 pub fn run() {
     let args: Vec<String> = std::env::args().collect();
@@ -913,15 +937,78 @@ fn session_is_current(rt: &Runtime, generation: u64) -> bool {
         .unwrap_or(false)
 }
 
-/// 说话过程中每隔 450ms 跑一次识别。
+/// 这一段音频里有没有「像样的声音」：逐 100ms 帧取 RMS，有一帧够响就算有。
+///
+/// 只看最大值而不是整段平均：4 秒静音里夹 0.3 秒说话，平均 RMS 会被静音稀释，
+/// 那样会把真正该识别的尾巴判成静音。
+fn has_speech(samples: &[f32]) -> bool {
+    const FRAME: usize = 1_600; // 100ms
+    samples.chunks(FRAME).any(|frame| {
+        if frame.len() < FRAME / 4 {
+            return false;
+        }
+        let rms = (frame.iter().map(|s| s * s).sum::<f32>() / frame.len() as f32).sqrt();
+        rms >= TAIL_SILENCE_RMS
+    })
+}
+
+/// 一轮会话的调度参数：刷新间隔下限、尾巴上限、强制切点。
+///
+/// 按模型分档的原因见 `MAX_TAIL_SAMPLES_QWEN3`。两个环境变量可以临时覆盖，
+/// 扫参时不用重编译（和 `YANCHU_ASR_THREADS` 一个套路）：
+/// `YANCHU_TICK_MS` 固定刷新间隔，`YANCHU_TAIL_SECS` 固定尾巴上限。
+fn loop_tuning() -> (Duration, usize, usize) {
+    let qwen3 = asr::AsrConfig::load(&asr::model_root()).is_qwen3();
+
+    let floor = std::env::var("YANCHU_TICK_MS")
+        .ok()
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        .map(Duration::from_millis)
+        .unwrap_or(if qwen3 {
+            PARTIAL_INTERVAL_QWEN3
+        } else {
+            PARTIAL_INTERVAL_MIN
+        });
+
+    if let Ok(v) = std::env::var("YANCHU_TAIL_SECS") {
+        if let Ok(secs) = v.trim().parse::<f32>() {
+            if secs >= 1.0 {
+                let n = (secs * 16_000.0) as usize;
+                return (floor, n, n.saturating_sub(16_000));
+            }
+        }
+    }
+
+    if qwen3 {
+        (floor, MAX_TAIL_SAMPLES_QWEN3, FORCED_COMMIT_SAMPLES_QWEN3)
+    } else {
+        (floor, MAX_TAIL_SAMPLES, FORCED_COMMIT_SAMPLES)
+    }
+}
+
+/// 说话过程中每隔一段时间跑一次识别。
 ///
 /// 策略：**已经说完的句子定稿后不再重算**，只有尾巴在变。
 /// 否则后面每说一句，前面所有字都会跟着重排，屏幕上整段都在跳。
 fn streaming_loop(app: AppHandle, generation: u64) {
     let rt = app.state::<Runtime>();
 
+    // 解码慢的时候把间隔放宽：450ms 的 tick 配 500ms 的解码，结果是每一拍都在解码，
+    // 唯一那把识别锁一直被占着，松手时的定稿解码只能排队 —— 用户感觉到的就是「松手后半天不出字」。
+    let (floor, max_tail, forced_commit) = loop_tuning();
+    let fixed_tick = std::env::var("YANCHU_TICK_MS").is_ok();
+
+    let mut interval = floor;
+    let mut next_tick = Instant::now();
+
     loop {
-        std::thread::sleep(PARTIAL_INTERVAL);
+        let now = Instant::now();
+        if next_tick > now {
+            std::thread::sleep(next_tick - now);
+        }
+        let tick_started = Instant::now();
+        // 先按当前间隔排下一拍：中间任何 `continue` 都不会变成空转
+        next_tick = tick_started + interval;
 
         if !session_is_current(&rt, generation) {
             break;
@@ -948,11 +1035,11 @@ fn streaming_loop(app: AppHandle, generation: u64) {
         };
 
         // 1. 碰到句间停顿就把前面这段定稿。
-        //    如果一直不停顿，尾巴会无限长大：每 450ms 都要重识别整段，
-        //    越说越慢，最后气泡完全跟不上。所以超过 12 秒就强制找一个低能量点切一刀。
+        //    如果一直不停顿，尾巴会无限长大：每拍都要重识别整段，
+        //    越说越慢，最后气泡完全跟不上。所以攒满 `max_tail` 就强制找一个低能量点切一刀。
         let point = find_commit_point(&samples, committed_end).or_else(|| {
-            if samples.len() > committed_end + MAX_TAIL_SAMPLES {
-                Some(forced_commit_point(&samples, committed_end))
+            if samples.len() > committed_end + max_tail {
+                Some(forced_commit_point(&samples, committed_end, forced_commit))
             } else {
                 None
             }
@@ -1025,7 +1112,7 @@ fn streaming_loop(app: AppHandle, generation: u64) {
             session.committed_end
         };
 
-        let tail = if samples.len() > tail_from + 3_200 {
+        let tail = if samples.len() > tail_from + 3_200 && has_speech(&samples[tail_from..]) {
             let started = std::time::Instant::now();
             let result = transcribe(&app, &samples[tail_from..]);
             let asr_ms = started.elapsed().as_millis() as u64;
@@ -1071,6 +1158,17 @@ fn streaming_loop(app: AppHandle, generation: u64) {
         if !display.is_empty() || !tail.is_empty() {
             bubble::partial_parts(&app, &display, &tail);
         }
+
+        // 下一拍什么时候来：解码本身要多久，间隔就放宽到它的 1.15 倍。
+        // 不这样的话「tick 450ms、解码 800ms」会让循环永远在解码，锁永远被占着。
+        interval = if fixed_tick {
+            floor
+        } else {
+            tick_started
+                .elapsed()
+                .mul_f32(1.15)
+                .clamp(floor, PARTIAL_INTERVAL_MAX)
+        };
     }
 }
 
@@ -1386,9 +1484,9 @@ fn is_cjk(c: char) -> bool {
 }
 
 /// 说话一直不停顿时的强制切点：在目标位置附近找一帧最安静的，找不到就硬切。
-fn forced_commit_point(samples: &[f32], from: usize) -> usize {
+fn forced_commit_point(samples: &[f32], from: usize, target_samples: usize) -> usize {
     const FRAME: usize = 1_600;
-    let target = from + FORCED_COMMIT_SAMPLES;
+    let target = from + target_samples;
     let lo = target.saturating_sub(8_000); // 往回找 0.5s
     let hi = (target + 8_000).min(samples.len().saturating_sub(FRAME));
 
@@ -2272,7 +2370,7 @@ fn run_stream_test(path: &std::path::Path) -> anyhow::Result<()> {
     while end <= samples.len() {
         let point = find_commit_point(&samples[..end], pos).or_else(|| {
             if end > pos + MAX_TAIL_SAMPLES {
-                Some(forced_commit_point(&samples[..end], pos))
+                Some(forced_commit_point(&samples[..end], pos, FORCED_COMMIT_SAMPLES))
             } else {
                 None
             }
@@ -2447,5 +2545,24 @@ mod commit_tests {
         let mut s: Vec<f32> = (0..3_200).map(|i| 0.05 * ((i as f32) * 0.1).sin()).collect();
         s.extend(std::iter::repeat_n(0.0f32, 9_600));
         assert_eq!(find_commit_point(&s, 0), None);
+    }
+
+    /// 纯静音的尾巴不该触发识别：切点落在静音末尾，刚定稿完那段必然是静音
+    #[test]
+    fn silence_tail_is_not_decoded() {
+        assert!(!super::has_speech(&vec![0.0f32; 16_000]));
+        // 底噪（-60dB 量级）也不算说话
+        let noise: Vec<f32> = (0..16_000).map(|i| 0.0005 * ((i as f32) * 1.7).sin()).collect();
+        assert!(!super::has_speech(&noise));
+    }
+
+    /// 4 秒静音里夹 0.3 秒说话，尾巴仍然要识别（平均 RMS 会被静音稀释，不能看平均）
+    #[test]
+    fn quiet_but_speaking_tail_is_decoded() {
+        let mut s = vec![0.0f32; 64_000];
+        for i in 0..4_800 {
+            s[64_000 - 4_800 + i] = 0.06 * ((i as f32) * 0.1).sin();
+        }
+        assert!(super::has_speech(&s));
     }
 }
