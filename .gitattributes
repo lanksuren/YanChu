@@ -1,0 +1,12 @@
+# 统一用 LF 存进仓库，检出也保持 LF，
+# 避免 Windows 上 core.autocrlf 反复改写整份文件造成假 diff。
+* text=auto eol=lf
+
+# 二进制资源
+*.png binary
+*.ico binary
+*.wav binary
+*.exe binary
+*.dll binary
+*.onnx binary
+*.tar.bz2 binary
