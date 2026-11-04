@@ -49,7 +49,10 @@ html, body {
   height: 40px;
   border: 2px solid rgba(37, 99, 235, 0.85);
   opacity: 0.35;
-  transition: transform var(--dur-instant) var(--ease-out), opacity var(--dur-instant) var(--ease-out), border-color var(--dur-fast) ease;
+  /* 透明度/颜色用 --dur-base 过渡：状态切换（说话↔停）不再是一下子跳过去 */
+  transition: transform var(--dur-instant) var(--ease-out),
+              opacity var(--dur-base) var(--ease-out),
+              border-color var(--dur-base) ease;
 }
 
 /* 实心点 */
@@ -57,7 +60,8 @@ html, body {
   width: 12px;
   height: 12px;
   background: var(--accent);
-  transition: transform var(--dur-instant) var(--ease-out), background var(--dur-fast) ease;
+  transition: transform var(--dur-instant) var(--ease-out),
+              background var(--dur-base) ease;
 }
 
 /* 润色旋转弧 */
@@ -93,7 +97,7 @@ html, body {
 #orb[data-state="listening"] #ring { opacity: 0.55; }
 
 /* 在听但没声音：慢呼吸，让用户知道还在录 */
-#orb[data-state="silent"] #core { animation: breathe 1.8s ease-in-out infinite; }
+#orb[data-state="silent"] #core { animation: breathe 2.4s ease-in-out infinite; }
 #orb[data-state="silent"] #ring { opacity: 0.2; }
 
 /* 有声音：核心变亮，环跟着 level 放大（由 JS 驱动） */
@@ -138,8 +142,9 @@ html, body {
 #orb.leaving { animation: orb-out 120ms var(--ease-in-out) both; }
 
 @keyframes breathe {
+  /* 幅度收小、周期拉长：原来 1.8s 里缩到 0.72，停下来那一瞬间看着像在跳 */
   0%, 100% { transform: scale(1); opacity: 0.9; }
-  50% { transform: scale(0.72); opacity: 0.45; }
+  50% { transform: scale(0.86); opacity: 0.55; }
 }
 
 @keyframes spin {

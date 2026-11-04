@@ -860,11 +860,75 @@ fn feed_wav(app: AppHandle, path: PathBuf, generation: u64) {
     }
 }
 
+/// 指示器的电平节奏：60ms 一拍。
+const LEVEL_TICK: Duration = Duration::from_millis(60);
+
+/// 判「开口」的电平（RMS）。0.01 约 -40dBFS：正常说话 0.03–0.2，环境噪声 <0.005。
+const LEVEL_ENTER: f32 = 0.010;
+/// 判「停下」的电平，**故意比开口低**（滞回）。
+///
+/// 两个阈值一样高就会在边界上疯狂来回切：换气、轻声尾字、词间停顿都会掉到 0.01 附近，
+/// 指示器于是每 60ms 在「呼吸」和「放大」之间跳一次 —— 用户看到的就是「闪」。
+const LEVEL_EXIT: f32 = 0.005;
+/// 连续几拍才算数：开口要 3 拍（180ms，别被一声咳嗽带跑），
+/// 停下要 8 拍（480ms，正好跨过人说话的正常换气停顿）。
+const LEVEL_ENTER_TICKS: u32 = 3;
+const LEVEL_EXIT_TICKS: u32 = 8;
+
+/// 电平状态机：带滞回 + 最短停留时间。
+///
+/// 原来的实现是 `if level > 0.01 { speaking } else { silent }`，
+/// 单拍判决、没有缓冲，实测在句尾换气时来回跳（2026-11-04 反馈）。
+struct LevelGate {
+    speaking: bool,
+    above: u32,
+    below: u32,
+}
+
+impl LevelGate {
+    fn new() -> Self {
+        Self {
+            speaking: false,
+            above: 0,
+            below: 0,
+        }
+    }
+
+    /// 喂一拍电平，返回「现在算不算在说话」。
+    fn update(&mut self, level: f32) -> bool {
+        if self.speaking {
+            if level <= LEVEL_EXIT {
+                self.below += 1;
+                if self.below >= LEVEL_EXIT_TICKS {
+                    self.speaking = false;
+                    self.below = 0;
+                    self.above = 0;
+                }
+            } else {
+                self.below = 0;
+            }
+        } else {
+            if level >= LEVEL_ENTER {
+                self.above += 1;
+                if self.above >= LEVEL_ENTER_TICKS {
+                    self.speaking = true;
+                    self.above = 0;
+                    self.below = 0;
+                }
+            } else {
+                self.above = 0;
+            }
+        }
+        self.speaking
+    }
+}
+
 /// 60ms 一次把电平推给指示器窗口。
 fn level_loop(app: AppHandle, generation: u64) {
     let rt = app.state::<Runtime>();
+    let mut gate = LevelGate::new();
     loop {
-        std::thread::sleep(Duration::from_millis(60));
+        std::thread::sleep(LEVEL_TICK);
 
         let current = rt
             .session
@@ -879,8 +943,7 @@ fn level_loop(app: AppHandle, generation: u64) {
         let level = engine.as_ref().map(|e| e.level()).unwrap_or(0.0);
         drop(engine);
 
-        // 阈值取 0.01：正常说话 0.03–0.2，环境噪声通常 <0.005
-        let state = if level > 0.01 { "speaking" } else { "silent" };
+        let state = if gate.update(level) { "speaking" } else { "silent" };
         bubble::set_level(&app, state, level);
     }
 }
@@ -2613,5 +2676,65 @@ mod commit_tests {
         );
         // 这一拍没识别出东西（静音）：保持上一帧，灰字不消失
         assert_eq!(super::stable_tail("这个接口", ""), "这个接口");
+    }
+}
+
+#[cfg(test)]
+mod level_tests {
+    use super::LevelGate;
+
+    fn feed(gate: &mut LevelGate, level: f32, ticks: usize) -> bool {
+        let mut last = false;
+        for _ in 0..ticks {
+            last = gate.update(level);
+        }
+        last
+    }
+
+    /// 一声咳嗽（单拍尖峰）不能把指示器切到「说话」
+    #[test]
+    fn single_spike_does_not_switch() {
+        let mut g = LevelGate::new();
+        assert!(!feed(&mut g, 0.5, 1));
+        assert!(!feed(&mut g, 0.0, 1));
+    }
+
+    /// 连续 3 拍才认「开口」
+    #[test]
+    fn needs_three_ticks_to_speak() {
+        let mut g = LevelGate::new();
+        assert!(!feed(&mut g, 0.05, 2));
+        assert!(feed(&mut g, 0.05, 1));
+    }
+
+    /// 说话中间换气 7 拍（420ms）不切回静音，第 8 拍才切
+    #[test]
+    fn keeps_speaking_through_breaths() {
+        let mut g = LevelGate::new();
+        assert!(feed(&mut g, 0.05, 3));
+        assert!(feed(&mut g, 0.0, 7));
+        assert!(!feed(&mut g, 0.0, 1));
+    }
+
+    /// 滞回带里（0.007，介于出口 0.005 和入口 0.010 之间）不改变状态
+    #[test]
+    fn hysteresis_band_does_not_flap() {
+        let mut g = LevelGate::new();
+        // 静音态：0.007 不够开口
+        assert!(!feed(&mut g, 0.007, 10));
+        // 说话态：0.007 也不够停下
+        assert!(feed(&mut g, 0.05, 3));
+        assert!(feed(&mut g, 0.007, 12));
+    }
+
+    /// 换气后又开口：静音计数要清零，别让累计值凑出一次误切
+    #[test]
+    fn breath_resets_counter() {
+        let mut g = LevelGate::new();
+        assert!(feed(&mut g, 0.05, 3));
+        assert!(feed(&mut g, 0.0, 6));
+        assert!(feed(&mut g, 0.05, 1)); // 又说话了，below 归零
+        assert!(feed(&mut g, 0.0, 7));
+        assert!(!feed(&mut g, 0.0, 1));
     }
 }
