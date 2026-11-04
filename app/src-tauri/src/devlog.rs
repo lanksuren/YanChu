@@ -845,6 +845,39 @@ fn count_fillers(s: &str) -> usize {
     FILLERS.iter().map(|f| s.matches(f).count()).sum()
 }
 
+/// 把文本切成「语义单位」：中文一个字算 1，英文/数字/标识符一个词算 1，
+/// 标点、空白、符号全部丢弃。
+///
+/// 产品定义里「气泡→落字」的硬指标是**实词集合不变**，不是字符串全等：
+/// 落字时补一个句号、中英文之间加一个空格，都不算改了措辞。
+/// 用这个函数比较，才能把「措辞变了」和「只是排版变了」分开。
+fn semantic_units(text: &str) -> Vec<String> {
+    let mut units: Vec<String> = Vec::new();
+    let mut word = String::new();
+
+    for ch in text.chars() {
+        let is_cjk = ('\u{3400}'..='\u{4DBF}').contains(&ch)
+            || ('\u{4E00}'..='\u{9FFF}').contains(&ch)
+            || ('\u{F900}'..='\u{FAFF}').contains(&ch);
+
+        if is_cjk {
+            if !word.is_empty() {
+                units.push(std::mem::take(&mut word));
+            }
+            units.push(ch.to_string());
+        } else if ch.is_ascii_alphanumeric() || ch == '_' {
+            // 英文单词统一小写：句首大写、`Bug`/`bug` 不算措辞变化
+            word.push(ch.to_ascii_lowercase());
+        } else if !word.is_empty() {
+            units.push(std::mem::take(&mut word));
+        }
+    }
+    if !word.is_empty() {
+        units.push(word);
+    }
+    units
+}
+
 fn pct(values: &[u64], p: f64) -> u64 {
     if values.is_empty() {
         return 0;
@@ -1018,8 +1051,19 @@ pub fn report(dir: &Path) -> anyhow::Result<()> {
     push(format!(
         "  契约复检      {violations} 条会被判违规（violates_contract，与运行时同一套规则）"
     ));
-    // 产品定义里的硬指标：气泡最后一帧 = 落字结果
-    let bubble_same = events
+    // 产品定义里的硬指标：气泡最后一帧的**措辞** = 落字结果的措辞。
+    // 口径是语义单位（中文按字、英文按词），标点 / 空白 / 空格不算内容变化；
+    // 字符串全等仍然报，用来和旧报告对照。
+    let landed = events.iter().filter(|e| e.aborted.is_none()).count();
+    let same_units = events
+        .iter()
+        .filter(|e| {
+            e.aborted.is_none()
+                && !e.display.is_empty()
+                && semantic_units(&e.display) == semantic_units(&e.polished)
+        })
+        .count();
+    let exact_same = events
         .iter()
         .filter(|e| {
             e.aborted.is_none()
@@ -1027,14 +1071,17 @@ pub fn report(dir: &Path) -> anyhow::Result<()> {
                 && e.display.trim() == e.polished.trim()
         })
         .count();
-    let landed = events.iter().filter(|e| e.aborted.is_none()).count();
     push(format!(
-        "  气泡→落字     {bubble_same}/{landed} 一致（{}%）（大润色改了气泡措辞的会掉在这里）",
+        "  气泡→落字     措辞一致 {same_units}/{landed}（{}%）—— 硬指标，按语义单位比",
         if landed == 0 {
             100
         } else {
-            bubble_same * 100 / landed
+            same_units * 100 / landed
         }
+    ));
+    push(format!(
+        "                 仅排版不同 {} 条；字符串全等 {exact_same}/{landed}（旧口径，含标点空白）",
+        same_units.saturating_sub(exact_same)
     ));
     push(format!(
         "  事实项告警     {fact_warned} 条（只记录不拦截，见 docs/问题清单.md YC-001）"
@@ -1282,5 +1329,26 @@ mod tests {
     fn truncate_counts_chars_not_bytes() {
         assert_eq!(truncate("中文测试", 2), "中文…");
         assert_eq!(truncate("abc", 5), "abc");
+    }
+
+    #[test]
+    fn semantic_units_ignore_punctuation_and_spacing() {
+        // 补了句号、中英文之间加了空格 —— 措辞没变，不应算成「气泡→落字不一致」
+        let bubble = "把 time out 从 30 秒改成 60 秒";
+        let landed = "把 timeout 从 30 秒改成 60 秒。";
+        assert_ne!(semantic_units(bubble), semantic_units(landed));
+
+        let bubble2 = "把time out从30秒改成60秒";
+        let landed2 = "把 time out 从 30 秒改成 60 秒。";
+        assert_eq!(semantic_units(bubble2), semantic_units(landed2));
+    }
+
+    #[test]
+    fn semantic_units_split_english_words_and_keep_cjk_chars() {
+        assert_eq!(semantic_units("跑 pytest"), vec!["跑", "pytest"]);
+        // 大写不算措辞变化
+        assert_eq!(semantic_units("Bug 修了"), semantic_units("bug 修了"));
+        // 标点自身不产生单位
+        assert!(semantic_units("，。！？").is_empty());
     }
 }
