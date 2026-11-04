@@ -8,6 +8,7 @@
 mod asr;
 mod audio;
 mod bench;
+mod bench_lat;
 mod bubble;
 mod devlog;
 mod glossary;
@@ -172,6 +173,19 @@ pub fn run() {
             .unwrap_or_else(|| "bench/corpus".to_string());
         if let Err(e) = bench::run(std::path::Path::new(&dir)) {
             eprintln!("验收失败: {e}");
+            std::process::exit(1);
+        }
+        return;
+    }
+
+    // 延迟拆分：encoder 成本 vs decoder 成本，见 bench_lat.rs 的注释
+    if let Some(idx) = args.iter().position(|a| a == "--bench-lat") {
+        let path = args
+            .get(idx + 1)
+            .cloned()
+            .unwrap_or_else(|| "bench/corpus/03.wav".to_string());
+        if let Err(e) = bench_lat::run(std::path::Path::new(&path)) {
+            eprintln!("延迟测量失败: {e}");
             std::process::exit(1);
         }
         return;
