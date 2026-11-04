@@ -39,3 +39,6 @@ Thumbs.db
 # 真人语料音频（本地录制，不进仓库；prompts.txt 保留）
 bench/real/*.wav
 tools/.lat-*.wav
+
+# 历史会话回收的真人语料：音频是本机录音，不进仓库；txt 保留（待校订）
+bench/history/*.wav

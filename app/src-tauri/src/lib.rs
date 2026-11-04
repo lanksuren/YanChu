@@ -139,6 +139,12 @@ pub fn run() {
 
     devlog::init_logging();
 
+    // 发版核对用：exe 里的版本号必须和 Cargo.toml 一致，不然「装的是哪版」说不清
+    if args.iter().any(|a| a == "--version" || a == "-V") {
+        println!("言出 v{}", env!("CARGO_PKG_VERSION"));
+        return;
+    }
+
     // 维护用：崩溃/被强杀后，手动把本地 Ollama 模型卸掉，释放显存。
     if args.iter().any(|a| a == "--unload-llm") {
         match llm::LlmConfig::load(&asr::model_root()) {
@@ -392,6 +398,7 @@ pub fn run() {
             set_deep,
             get_state,
             get_diagnostics,
+            get_version,
             retry_audio,
             get_flags,
             get_logs,
@@ -1735,6 +1742,13 @@ fn get_state() -> serde_json::Value {
         "engine": if cfg!(feature = "asr") { asr_cfg.engine.clone() } else { "placeholder".to_string() },
         "engine_label": if cfg!(feature = "asr") { asr_cfg.label() } else { "占位识别器" },
     })
+}
+
+/// 版本号的唯一来源是 Cargo.toml。控制面板不再手写版本字符串 ——
+/// 之前侧边栏写死 `v0.2`，发版时忘了改，界面和 exe 就对不上了。
+#[tauri::command]
+fn get_version() -> String {
+    env!("CARGO_PKG_VERSION").to_string()
 }
 
 /// 控制面板「设置 → 运行状态」用：现在到底能不能用。

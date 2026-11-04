@@ -1640,6 +1640,14 @@ loadState().catch((e) => console.error('控制面板初始化失败', e));
 loadTriggerConfig();
 loadBubbleUi().catch((e) => console.error('读取气泡外观失败', e));
 loadModels();
+// 版本号从 Cargo.toml 来（get_version），不在 HTML 里手写：
+// 以前侧边栏写死 v0.2，发版时界面和 exe 就对不上。
+invoke('get_version')
+  .then((v) => {
+    const el = document.getElementById('appVersion');
+    if (el && v) el.textContent = 'v' + v;
+  })
+  .catch(() => {});
 invoke('get_flags')
   .then((f) => {
     if (f && f.reduced_motion) document.documentElement.classList.add('reduced-motion');
