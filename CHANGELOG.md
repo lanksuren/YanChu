@@ -31,6 +31,10 @@
 ### 新增
 
 - `semantic_units` 两条单测（标点空白不计、英文按词且不区分大小写），单测总数 170。
+- 真人语料录制入口：`yanchu.exe --record-wav <wav> [秒]` + `tools/record-corpus.ps1`
+  （逐句显示、倒计时、可重录），语料 20 句放在 `bench/real/prompts.txt`。
+  录制时输出 RMS 与峰值，麦克风被静音会当场报警而不是录完才发现。
+  实测本机设备输出数字静音，已登记 YC-023。
 
 ### 决策记录
 
