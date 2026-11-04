@@ -937,6 +937,25 @@ fn session_is_current(rt: &Runtime, generation: u64) -> bool {
         .unwrap_or(false)
 }
 
+/// 灰字「只增不改」：同一段音频重复解码时，结果会来回变（多一个字、少一个字、
+/// 标点挪位置），逐拍替换看起来就是「不说话时灰字一直在闪」。
+///
+/// 只接受两种更新：新结果在上一帧基础上变长（往下说了），或明显更长（多出一句以上，
+/// 说明这次是全新的解码而不是抖动）。缩水、换个说法都保持上一帧 ——
+/// 真正的定稿在 commit / 松手时发生，灰字只是预览。
+fn stable_tail(prev: &str, next: &str) -> String {
+    if next.is_empty() {
+        return prev.to_string();
+    }
+    if prev.is_empty() || next.starts_with(prev) {
+        return next.to_string();
+    }
+    if next.chars().count() > prev.chars().count() + 6 {
+        return next.to_string();
+    }
+    prev.to_string()
+}
+
 /// 这一段音频里有没有「像样的声音」：逐 100ms 帧取 RMS，有一帧够响就算有。
 ///
 /// 只看最大值而不是整段平均：4 秒静音里夹 0.3 秒说话，平均 RMS 会被静音稀释，
@@ -1000,6 +1019,8 @@ fn streaming_loop(app: AppHandle, generation: u64) {
 
     let mut interval = floor;
     let mut next_tick = Instant::now();
+    // 上一拍显示的灰字（用来做「只增不改」的稳定性判断，见 stable_tail）
+    let mut last_tail = String::new();
 
     loop {
         let now = Instant::now();
@@ -1084,6 +1105,9 @@ fn streaming_loop(app: AppHandle, generation: u64) {
                     let display = session.stream.display();
                     drop(session);
 
+                    // 这一段已经定稿，灰字从头开始（否则旧灰字会粘在新段前面）
+                    last_tail.clear();
+
                     if polished == text {
                         log::info!("定稿: {text}");
                     } else {
@@ -1112,7 +1136,7 @@ fn streaming_loop(app: AppHandle, generation: u64) {
             session.committed_end
         };
 
-        let tail = if samples.len() > tail_from + 3_200 && has_speech(&samples[tail_from..]) {
+        let tail_raw = if samples.len() > tail_from + 3_200 && has_speech(&samples[tail_from..]) {
             let started = std::time::Instant::now();
             let result = transcribe(&app, &samples[tail_from..]);
             let asr_ms = started.elapsed().as_millis() as u64;
@@ -1129,7 +1153,14 @@ fn streaming_loop(app: AppHandle, generation: u64) {
             String::new()
         };
 
-        let tail = tail.trim();
+        // 灰字稳定性：模型的尾巴解码在「同一段音频 + 后面接了点静音」时结果会来回变，
+        // 逐帧替换就是用户看到的「不说话时灰字一直在闪」。
+        // 规则：只有变长且前缀一致才更新，缩水或换了结论都保持上一帧；
+        // 定稿（commit）时清空，下一段重新开始。
+        let tail_raw = stable_tail(&last_tail, &tail_raw);
+        last_tail = tail_raw.clone();
+
+        let tail = tail_raw.trim();
         // 尾巴只剩标点时（句间停顿会被识别成一个「。」）不往气泡里放，
         // 否则屏幕上会短暂出现「……问题。。」这种双句号
         let tail = if has_content(tail) { tail } else { "" };
@@ -2564,5 +2595,23 @@ mod commit_tests {
             s[64_000 - 4_800 + i] = 0.06 * ((i as f32) * 0.1).sin();
         }
         assert!(super::has_speech(&s));
+    }
+
+    /// 灰字只能往前长：同一个音频重复解码差一两个字，不能让屏幕上的字来回跳
+    #[test]
+    fn tail_only_grows() {
+        assert_eq!(super::stable_tail("", "这个"), "这个");
+        assert_eq!(super::stable_tail("这个", "这个接口"), "这个接口");
+        // 缩水：保持上一帧
+        assert_eq!(super::stable_tail("这个接口", "这个"), "这个接口");
+        // 换了说法但差不多长：保持上一帧，避免来回闪
+        assert_eq!(super::stable_tail("这个接口返回空", "这个接口返回了空"), "这个接口返回空");
+        // 明显更长（真往下说了）：认新的
+        assert_eq!(
+            super::stable_tail("这个接口", "这个接口返回空我怀疑是缓存的问题"),
+            "这个接口返回空我怀疑是缓存的问题"
+        );
+        // 这一拍没识别出东西（静音）：保持上一帧，灰字不消失
+        assert_eq!(super::stable_tail("这个接口", ""), "这个接口");
     }
 }

@@ -6,7 +6,9 @@
 :root {
   --card: var(--bubble-bg);
   --fg: var(--text);
-  --tail: var(--text-muted);
+  /* 灰字用自己的色阶：--text-muted 在 11px 下和正文几乎分不出来（用户反馈）。
+     见 tokens.css 的 --text-tail。 */
+  --tail: var(--text-tail);
 }
 
 * { box-sizing: border-box; }

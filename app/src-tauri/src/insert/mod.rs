@@ -15,8 +15,9 @@ use std::fmt;
 use std::time::Duration;
 
 use windows::Win32::Foundation::{GetLastError, HWND};
+use windows::Win32::System::Threading::{AttachThreadInput, GetCurrentThreadId};
 use windows::Win32::UI::WindowsAndMessaging::{
-    GetForegroundWindow, GetWindowThreadProcessId, SetForegroundWindow,
+    BringWindowToTop, GetForegroundWindow, GetWindowThreadProcessId, SetForegroundWindow,
 };
 
 /// 修饰键守卫的最大等待。人手从松键到物理抬起通常 <200ms，
@@ -54,6 +55,64 @@ impl Anchor {
     pub fn is_still_foreground(&self) -> bool {
         unsafe { GetForegroundWindow() == self.hwnd() }
     }
+}
+
+/// 把前台还给 `target`，成功返回 true。
+///
+/// **只调 SetForegroundWindow 是不够的**：Windows 有前台锁，后台进程改前台会被静默拒绝
+/// （返回值是 false，而且前台压根没变）。标准解法是把当前前台线程和本线程
+/// AttachThreadInput 到一起，临时共享输入队列，再 SetForegroundWindow ——
+/// `tools/e2e-test.ps1` 里也是这么做的。
+///
+/// 这一步的意义：气泡/指示器偶尔会把前台抢过去，用户其实一直待在输入框里，
+/// 以前抢不回来就报「焦点已经离开原来的输入框」，等于把字丢到剪贴板（2026-11-04 反馈）。
+pub fn force_foreground(target: HWND) -> bool {
+    unsafe {
+        if GetForegroundWindow() == target {
+            return true;
+        }
+
+        let fg = GetForegroundWindow();
+        let mut fg_pid = 0u32;
+        let fg_tid = GetWindowThreadProcessId(fg, Some(&mut fg_pid as *mut u32));
+        let cur_tid = GetCurrentThreadId();
+
+        let attached = fg_tid != 0 && fg_tid != cur_tid && AttachThreadInput(cur_tid, fg_tid, true).as_bool();
+        let _ = BringWindowToTop(target);
+        let raised = SetForegroundWindow(target).as_bool();
+        if attached {
+            let _ = AttachThreadInput(cur_tid, fg_tid, false);
+        }
+
+        raised && GetForegroundWindow() == target
+    }
+}
+
+/// 前台是谁的进程（诊断用）
+fn foreground_pid() -> u32 {
+    unsafe {
+        let fg = GetForegroundWindow();
+        let mut pid = 0u32;
+        GetWindowThreadProcessId(fg, Some(&mut pid as *mut u32));
+        pid
+    }
+}
+
+/// 试着把前台抢回 anchor，最多试 `tries` 次，间隔 60ms。
+///
+/// 为什么要重试：抢回前台之后目标窗口还要几十毫秒才把焦点落到输入框里，
+/// 只查一次会把「正在回来的路上」误判成「回不来」。
+pub fn reclaim_foreground(anchor: &Anchor, tries: u32) -> bool {
+    for _ in 0..tries {
+        if anchor.is_still_foreground() {
+            return true;
+        }
+        if force_foreground(anchor.hwnd()) && anchor.is_still_foreground() {
+            return true;
+        }
+        std::thread::sleep(Duration::from_millis(60));
+    }
+    anchor.is_still_foreground()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
@@ -126,36 +185,41 @@ pub fn insert_text(text: &str, anchor: &Anchor) -> InsertOutcome {
     }
 
     // 2. 落点还在吗。
-    // 如果前台被我们自己的气泡/指示器抢了，不是用户真的换了输入框：
-    // 先还回去再落字，别误报「焦点已离开」。
+    // 前台被抢走有两种情况，处理不一样：
+    //   * 被我们自己的气泡/指示器抢了 —— 用户根本没动，抢回来接着落字；
+    //   * 别的进程抢了 —— 也可能是输入法候选框之类的临时窗口，同样先抢一次试试。
+    // 以前只调一次 SetForegroundWindow，被前台锁拒绝后就报「焦点已离开」，
+    // 用户明明还在输入框里却被告知失去了焦点（2026-11-04 反馈）。
     if !anchor.is_still_foreground() {
-        unsafe {
-            let fg = GetForegroundWindow();
-            let mut fg_pid = 0u32;
-            GetWindowThreadProcessId(fg, Some(&mut fg_pid as *mut u32));
-            if fg_pid == std::process::id() {
-                log::warn!("落点被本进程窗口抢走，先还给输入框再落字");
-                let _ = SetForegroundWindow(anchor.hwnd());
-                std::thread::sleep(Duration::from_millis(120));
-            }
+        let ours = foreground_pid() == std::process::id();
+        if ours {
+            log::warn!("落点被本进程窗口抢走，用 AttachThreadInput 抢回前台");
+        } else {
+            log::warn!("落点不是前台，先尝试抢回（前台 pid={}）", foreground_pid());
+        }
+        if reclaim_foreground(anchor, 5) {
+            log::info!("前台已抢回落点，继续落字");
         }
     }
 
     if !anchor.is_still_foreground() {
         // 诊断：把「现在是谁在前台」记下来，否则只知道焦点变了不知道被谁抢的
+        let fg_pid = foreground_pid();
         unsafe {
-            let fg = GetForegroundWindow();
-            let mut fg_pid = 0u32;
-            GetWindowThreadProcessId(fg, Some(&mut fg_pid as *mut u32));
             log::warn!(
                 "焦点已变：前台 hwnd={:?} pid={fg_pid}，落点 hwnd={:?}，本进程 pid={}",
-                fg.0,
+                GetForegroundWindow().0,
                 anchor.hwnd().0,
                 std::process::id()
             );
         }
         clipboard::set_text(text);
-        return InsertOutcome::fallback("焦点已经离开原来的输入框，已复制到剪贴板");
+        let why = if fg_pid == std::process::id() {
+            "气泡挡住了落点，抢不回前台，已复制到剪贴板"
+        } else {
+            "焦点已经离开原来的输入框，已复制到剪贴板"
+        };
+        return InsertOutcome::fallback(why);
     }
 
     // 3. 走剪贴板粘贴（比逐字输入快一个数量级，也不会丢字）

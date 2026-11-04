@@ -24,6 +24,9 @@
   --surface-raised: #ffffff;
   --text: #111827;
   --text-muted: #5b6472;
+  /* 气泡里的灰字（还没定稿的那段）。比 muted 再淡一档：
+     11px 字号下 #5b6472 和正文 #111827 的差距，用户反馈「区别不大」。 */
+  --text-tail: rgba(17, 24, 39, 0.38);
   --border: #e5e7eb;
   --accent: #2563eb;
   --ok: #059669;
@@ -42,6 +45,7 @@
     --surface-raised: #1e2127;
     --text: #e5e7eb;
     --text-muted: #9ca3af;
+    --text-tail: rgba(229, 231, 235, 0.42);
     --border: #2b3038;
     --accent: #60a5fa;
     --ok: #34d399;

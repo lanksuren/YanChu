@@ -17,7 +17,7 @@ use windows::Win32::Graphics::Gdi::ClientToScreen;
 
 use windows::Win32::UI::WindowsAndMessaging::{
     GetCursorPos, GetForegroundWindow, GetGUIThreadInfo, GetSystemMetrics, GetWindowLongPtrW,
-    GetWindowThreadProcessId, SetForegroundWindow, SetWindowLongPtrW, ShowWindow, GUITHREADINFO,
+    GetWindowThreadProcessId, SetWindowLongPtrW, ShowWindow, GUITHREADINFO,
     GWL_EXSTYLE, SM_CXSCREEN, SM_CYSCREEN, SW_SHOWNOACTIVATE, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
 };
 
@@ -121,10 +121,15 @@ fn show_quiet(win: &tauri::WebviewWindow) {
 }
 
 /// 显示之后盯一小会儿：只要前台还是本进程的窗口，就还给 anchor。
-/// 冷启动时 WebView2 可能晚 100–300ms 才激活，所以不能只查一次。
+/// 冷启动时 WebView2 可能晚 100–300ms 才激活；气泡第一次渲染文字时也可能再抢一次，
+/// 所以盯 2 秒（以前只盯 420ms，晚一点被抢就没人管了）。
+///
+/// 抢回前台必须走 `insert::force_foreground`（AttachThreadInput）：
+/// 直接 SetForegroundWindow 会被 Windows 的前台锁静默拒绝，
+/// 表现就是「用户明明没离开输入框，却提示失去焦点、字掉进剪贴板」。
 fn guard_focus(anchor: Anchor) {
     std::thread::spawn(move || {
-        for _ in 0..6 {
+        for _ in 0..28 {
             std::thread::sleep(Duration::from_millis(70));
             unsafe {
                 let fg = GetForegroundWindow();
@@ -133,7 +138,7 @@ fn guard_focus(anchor: Anchor) {
                 if pid != std::process::id() {
                     return;
                 }
-                let _ = SetForegroundWindow(anchor.hwnd());
+                crate::insert::force_foreground(anchor.hwnd());
             }
         }
     });
