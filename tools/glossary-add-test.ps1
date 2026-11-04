@@ -88,15 +88,19 @@ Start-Sleep -Milliseconds 400
 Remove-Item $log -ErrorAction SilentlyContinue
 
 $env:YANCHU_OPEN_PANEL = '1'
+$env:YANCHU_PANEL_TAB = 'glossary'
 $app = Start-Process -FilePath $exe -PassThru -RedirectStandardError $log -WindowStyle Hidden
-Start-Sleep -Seconds 5
+Start-Sleep -Seconds 2
 
 $panel = [IntPtr]::Zero
 try {
-    $panel = [GA]::FindByTitle('言出 · 控制面板', $app.Id)
+    for ($i = 0; $i -lt 36 -and $panel -eq [IntPtr]::Zero; $i++) {
+        $panel = [GA]::FindByTitle('言出 · 控制面板', $app.Id)
+        if ($panel -eq [IntPtr]::Zero) { Start-Sleep -Milliseconds 500 }
+    }
     if ($panel -eq [IntPtr]::Zero) { throw '没找到控制面板' }
     [GA]::Topmost($panel, $true)
-    Start-Sleep -Milliseconds 700
+    Start-Sleep -Milliseconds 900
 
     $r = New-Object GA+RECT
     [void][GA]::GetWindowRect($panel, [ref]$r)
@@ -104,31 +108,26 @@ try {
     $h = $r.Bottom - $r.Top
     $px = { param($fx, $fy) [int]($r.Left + $w * $fx), [int]($r.Top + $h * $fy) }
 
-    # 词表页签（最右）
-    $p = & $px 0.932 0.095
-    [GA]::ClickAt($p[0], $p[1])
-    Start-Sleep -Milliseconds 900
-
     # 正确写法 / 会被误读成（用剪贴板粘贴，避免输入法把字母拆成拼音）
-    $p = & $px 0.233 0.280
+    $p = & $px 0.43 0.335
     [GA]::ClickAt($p[0], $p[1])
     Set-Clipboard -Value 'zzzhelper'
     [GA]::Key(0xA2, $true); [GA]::Key(0x56, $true); [GA]::Key(0x56, $false); [GA]::Key(0xA2, $false)
     Start-Sleep -Milliseconds 300
 
-    $p = & $px 0.636 0.280
+    $p = & $px 0.71 0.335
     [GA]::ClickAt($p[0], $p[1])
     Set-Clipboard -Value 'zzzhelber'
     [GA]::Key(0xA2, $true); [GA]::Key(0x56, $true); [GA]::Key(0x56, $false); [GA]::Key(0xA2, $false)
     Start-Sleep -Milliseconds 300
 
     # 添加
-    $p = & $px 0.897 0.271
+    $p = & $px 0.89 0.335
     [GA]::ClickAt($p[0], $p[1])
     Start-Sleep -Milliseconds 600
 
     # 保存词表
-    $p = & $px 0.305 0.414
+    $p = & $px 0.885 0.49
     [GA]::ClickAt($p[0], $p[1])
     Start-Sleep -Milliseconds 1500
 
@@ -146,6 +145,7 @@ try {
 } finally {
     if ($panel -ne [IntPtr]::Zero) { [GA]::Topmost($panel, $false) }
     $env:YANCHU_OPEN_PANEL = $null
+    $env:YANCHU_PANEL_TAB = $null
     Get-Process -Id $app.Id -ErrorAction SilentlyContinue | Stop-Process -Force
     Move-Item $backup $glossary -Force
     Remove-Item $log -Force -ErrorAction SilentlyContinue

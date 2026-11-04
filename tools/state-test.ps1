@@ -164,8 +164,12 @@ function Activate-CheckBox($el) {
 function Start-App {
   $env:YANCHU_OPEN_PANEL = '1'
   $p = Start-Process -FilePath $exe -PassThru -RedirectStandardError $log -WindowStyle Hidden
-  Start-Sleep -Seconds 5
-  $panel = [S]::Find('言出 · 控制面板', $p.Id)
+  # 首次启动要加载识别模型；轮询等面板，别用固定 5 秒赌时序。
+  $panel = [IntPtr]::Zero
+  for ($i = 0; $i -lt 36 -and $panel -eq [IntPtr]::Zero; $i++) {
+    Start-Sleep -Milliseconds 500
+    $panel = [S]::Find('言出 · 控制面板', $p.Id)
+  }
   return @($p, $panel)
 }
 
@@ -196,11 +200,21 @@ try {
   [void][S]::SetForegroundWindow($panel)
   Start-Sleep -Milliseconds 700
 
-  $dict = Find-CheckBox $panel '语音听写'
+  # WebView2 的无障碍树在第一次查询之后才建立；首查可能返回空，
+  # 轮询几次再断言，否则第一条「找到开关」会误报。
+  $dict = $null
+  for ($i = 0; $i -lt 4 -and $null -eq $dict; $i++) {
+    $dict = Find-CheckBox $panel '语音听写'
+    if ($null -eq $dict) { Start-Sleep -Milliseconds 400 }
+  }
   Check ($null -ne $dict) '找到「语音听写」开关'
   Check (Log-Has '读取状态：听写=false') '启动时读到了持久化的「关」（不是默认的开）'
 
-  $deep = Find-CheckBox $panel '深度整理'
+  $deep = $null
+  for ($i = 0; $i -lt 4 -and $null -eq $deep; $i++) {
+    $deep = Find-CheckBox $panel '深度整理'
+    if ($null -eq $deep) { Start-Sleep -Milliseconds 400 }
+  }
   Check ($null -ne $deep) '找到「深度整理」开关'
   Check (-not $deep.Current.IsEnabled) '没有云端 API 时深度开关置灰'
 

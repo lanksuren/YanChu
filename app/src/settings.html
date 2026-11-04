@@ -7,284 +7,439 @@
   <link rel="stylesheet" href="settings.css" />
 </head>
 <body>
-  <header>
-    <div class="logo"></div>
-    <div class="title">
-      <h1>言出</h1>
-      <p class="sub">说话即成文 · 状态、输入方式和外观都在设置里</p>
-    </div>
-    <div class="tabs" role="tablist" aria-label="控制面板分区">
-      <button class="tab active" role="tab" aria-selected="true" aria-controls="pane-settings" id="tab-settings" data-tab="settings">设置</button>
-      <button class="tab" role="tab" aria-selected="false" aria-controls="pane-models" id="tab-models" data-tab="models">模型</button>
-      <button class="tab" role="tab" aria-selected="false" aria-controls="pane-history" id="tab-history" data-tab="history">历史</button>
-      <button class="tab" role="tab" aria-selected="false" aria-controls="pane-glossary" id="tab-glossary" data-tab="glossary">词表</button>
-    </div>
-  </header>
-
-  <!-- 设置：运行状态 + 开关 + 输入方式 + 气泡外观 + 高级 -->
-  <section class="pane active" id="pane-settings" role="tabpanel" aria-labelledby="tab-settings">
-    <div class="card guide" id="guideCard" hidden>
-      <strong>第一次用？三步就行</strong>
-      <ol>
-        <li>把光标放进任意输入框</li>
-        <li><span id="guideHow">按住</span> <kbd id="guideKey">右 Alt</kbd> <span id="guideThen">说一句，松手</span></li>
-        <li>字会直接出现在光标处；焦点离开时自动复制到剪贴板</li>
-      </ol>
-    </div>
-
-    <h3 class="section-title">输入方式</h3>
-    <div class="card">
-      <div class="row">
-        <div class="label"><strong>输入模式</strong><span>按住说话：松手结束；按一下：再按一次或 Esc 结束</span></div>
-        <div class="segmented" id="modeSeg" role="radiogroup" aria-label="输入模式">
-          <button class="seg active" type="button" data-mode="hold" role="radio" aria-checked="true">按住说话</button>
-          <button class="seg" type="button" data-mode="toggle" role="radio" aria-checked="false">按一下开始 / 停止</button>
+  <div class="app">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="logo" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><rect x="5" y="9" width="2.6" height="6" rx="1.3"/><rect x="10.7" y="5.5" width="2.6" height="13" rx="1.3"/><rect x="16.4" y="10.5" width="2.6" height="3" rx="1.3"/></svg>
+        </div>
+        <div class="brand-text">
+          <strong>言出</strong>
+          <span>v0.2</span>
         </div>
       </div>
-      <div class="row">
-        <div class="label"><strong>触发键</strong><span>点右侧按钮后，直接按下你想要的组合键</span></div>
-        <button id="captureKey" class="capture" type="button">右 Alt</button>
-      </div>
-      <div class="row">
-        <div class="label"><strong>长按触发</strong><span>按住超过设定时间才开始；没到时间就松开会被忽略</span></div>
-        <select id="longPress" class="longpress" aria-label="长按触发时间">
-          <option value="0">立即触发</option>
-          <option value="200">200 ms</option>
-          <option value="350">350 ms</option>
-          <option value="500">500 ms</option>
-        </select>
-      </div>
-    </div>
-    <div class="toolbar">
-      <button id="saveTrigger" class="primary" type="button">保存输入设置</button>
-      <button id="resetTrigger" class="ghost" type="button">恢复默认</button>
-      <span class="hint" id="triggerHint"></span>
-    </div>
-    <p class="hint trigger-tip" id="triggerTip">组合键请包含一个普通键（如 Ctrl+Shift+Space）；也可以单独用 F 键、CapsLock 或右 Alt。Esc 留给「结束录音」。单键触发时这个键会被应用接管，不再传给其他程序。</p>
 
-    <h3 class="section-title">开关</h3>
-    <div class="card">
-      <div class="row">
-        <div class="label"><strong>语音听写</strong><span>关掉之后触发键不再触发录音</span></div>
-        <label class="switch"><input type="checkbox" id="dictation" aria-label="语音听写" /><span class="slider"></span></label>
-      </div>
-      <div class="row">
-        <div class="label"><strong>润色</strong><span>去口头语、修标点、纠术语</span></div>
-        <label class="switch"><input type="checkbox" id="polish" aria-label="润色" /><span class="slider"></span></label>
-      </div>
-      <div class="row">
-        <div class="label"><strong>深度整理</strong><span id="deepHint">允许改写与分点，松手后多等 1–2 秒</span></div>
-        <label class="switch"><input type="checkbox" id="deep" aria-label="深度整理" /><span class="slider"></span></label>
-      </div>
-    </div>
+      <nav class="tabs" role="tablist" aria-label="控制面板分区" aria-orientation="vertical">
+        <button class="tab active" role="tab" aria-selected="true" aria-controls="pane-settings" id="tab-settings" data-tab="settings" tabindex="0" title="设置">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h9M18 7h2M4 17h3M12 17h8"/><circle cx="15.5" cy="7" r="2.2"/><circle cx="9.5" cy="17" r="2.2"/></svg>
+          <span>设置</span>
+        </button>
+        <button class="tab" role="tab" aria-selected="false" aria-controls="pane-models" id="tab-models" data-tab="models" tabindex="-1" title="模型">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 9 5-9 5-9-5 9-5Z"/><path d="m3 13 9 5 9-5"/></svg>
+          <span>模型</span>
+        </button>
+        <button class="tab" role="tab" aria-selected="false" aria-controls="pane-history" id="tab-history" data-tab="history" tabindex="-1" title="历史">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg>
+          <span>历史</span>
+        </button>
+        <button class="tab" role="tab" aria-selected="false" aria-controls="pane-glossary" id="tab-glossary" data-tab="glossary" tabindex="-1" title="词表">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v16H6.5A2.5 2.5 0 0 0 4 21.5v-16Z"/><path d="M4 18.5A2.5 2.5 0 0 1 6.5 16H20"/></svg>
+          <span>词表</span>
+        </button>
+      </nav>
 
-    <h3 class="section-title">运行状态</h3>
-    <div class="card ready" id="readyCard">
-      <div class="ready-row">
-        <span class="dot" id="dotMic"></span><span class="ready-name">麦克风</span>
-        <b id="txtMic">检查中…</b>
-        <button id="retryMic" class="mini" type="button" hidden>重试</button>
+      <div class="sidebar-foot">
+        <span class="local-dot" aria-hidden="true"></span>
+        <span>本地运行</span>
       </div>
-      <div class="ready-row">
-        <span class="dot" id="dotAsr"></span><span class="ready-name">识别模型</span>
-        <b id="txtAsr">检查中…</b>
-      </div>
-      <div class="ready-row">
-        <span class="dot" id="dotHotkey"></span><span class="ready-name">触发键</span>
-        <b id="txtHotkey">检查中…</b>
-      </div>
-      <div class="ready-row">
-        <span class="dot" id="dotPolish"></span><span class="ready-name">润色档</span>
-        <b id="txtPolish">检查中…</b>
-      </div>
-    </div>
+    </aside>
 
-    <div class="card meta">
-      <div class="kv"><span>识别引擎</span><b id="engine">—</b></div>
-      <div class="kv"><span>大润色</span><b id="llm">—</b></div>
-      <div class="kv"><span>热词条数</span><b id="termCount">—</b></div>
-    </div>
+    <main class="content">
+      <!-- 设置：运行状态 + 输入方式 + 开关 + 气泡外观 + 高级 -->
+      <section class="pane active" id="pane-settings" role="tabpanel" aria-labelledby="tab-settings">
+        <div class="pane-head">
+          <div>
+            <h2>设置</h2>
+            <p>输入方式、能力开关与气泡外观</p>
+          </div>
+        </div>
 
-    <h3 class="section-title">气泡外观</h3>
-    <div class="toolbar">
-      <span class="hint">改数字时下面会实时预览；保存后真实气泡生效，下次启动也记得。</span>
-    </div>
-    <div class="bubble-preview" id="bubblePreview">
-      <div class="bp-card" id="bpCard">示例：把这段逻辑抽成一个 helper 函数，然后重启服务。</div>
-    </div>
-    <div class="card">
-      <div class="row">
-        <div class="label"><strong>宽度</strong><span>320–900 px，窄一点更不挡视线</span></div>
-        <input type="number" id="bubbleWidth" min="320" max="900" step="10" />
-      </div>
-      <div class="row">
-        <div class="label"><strong>高度</strong><span>80–360 px，约等于「行数 × 字号 × 1.5」</span></div>
-        <input type="number" id="bubbleHeight" min="80" max="360" step="4" />
-      </div>
-      <div class="row">
-        <div class="label"><strong>字号</strong><span>9–16 px，11 号大约是三行</span></div>
-        <input type="number" id="bubbleFont" min="9" max="16" step="0.5" />
-      </div>
-    </div>
-    <div class="toolbar">
-      <button id="saveBubbleUi">保存</button>
-      <button id="resetBubbleUi" class="ghost">恢复默认</button>
-      <span class="hint" id="bubbleHint"></span>
-    </div>
+        <div class="card guide" id="guideCard" hidden>
+          <div class="guide-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><path d="M12 3v3M12 18v3M4.2 7.2l2.1 2.1M17.7 14.7l2.1 2.1M3 12h3M18 12h3M4.2 16.8l2.1-2.1M17.7 9.3l2.1-2.1"/><circle cx="12" cy="12" r="2.6"/></svg>
+          </div>
+          <div class="guide-body">
+            <strong>三步开始</strong>
+            <p>把光标放进输入框 → <span id="guideHow">按住</span> <kbd id="guideKey">右 Alt</kbd> <span id="guideThen">说一句，松手</span> → 文字直接落字</p>
+          </div>
+        </div>
 
-    <h3 class="section-title">高级：试一段润色</h3>
-    <textarea id="polishInput" class="polish-input" spellcheck="false" placeholder="粘一段识别出来的原始文本，看看润色前后差别"></textarea>
-    <div class="toolbar">
-      <button id="runRules">只走规则</button>
-      <button id="runBoth">带大润色</button>
-      <button id="runDeep">深度整理</button>
-      <span class="hint" id="polishHint"></span>
-    </div>
-    <div class="compare">
-      <div class="col">
-        <h3>规则层</h3>
-        <pre id="outRuled">—</pre>
-      </div>
-      <div class="col">
-        <h3>最终（可能含大润色）</h3>
-        <pre id="outFinal">—</pre>
-      </div>
-    </div>
+        <div class="card">
+          <div class="card-head">
+            <h2 class="card-title">运行状态</h2>
+          </div>
+          <div class="status-grid">
+            <div class="status-item">
+              <span class="dot" id="dotMic" aria-hidden="true"></span>
+              <span class="status-name">麦克风</span>
+              <b id="txtMic">检查中…</b>
+              <button id="retryMic" class="mini" type="button" hidden>重试</button>
+            </div>
+            <div class="status-item">
+              <span class="dot" id="dotAsr" aria-hidden="true"></span>
+              <span class="status-name">识别模型</span>
+              <b id="txtAsr">检查中…</b>
+            </div>
+            <div class="status-item">
+              <span class="dot" id="dotHotkey" aria-hidden="true"></span>
+              <span class="status-name">触发键</span>
+              <b id="txtHotkey">检查中…</b>
+            </div>
+            <div class="status-item">
+              <span class="dot" id="dotPolish" aria-hidden="true"></span>
+              <span class="status-name">润色档</span>
+              <b id="txtPolish">检查中…</b>
+            </div>
+          </div>
+          <div class="status-meta">
+            <span><i>识别引擎</i><b id="engine">—</b></span>
+            <span><i>大润色</i><b id="llm">—</b></span>
+            <span><i>热词</i><b id="termCount">—</b></span>
+          </div>
+        </div>
 
-    <details class="dev" id="devPanel">
-      <summary>开发者模式 · 日志</summary>
-      <div class="toolbar">
-        <button id="logRefresh" type="button">刷新</button>
-        <button id="logCopy" type="button" class="ghost">复制</button>
-        <button id="logClear" type="button" class="ghost">清空</button>
-        <button id="quitApp" type="button" class="ghost">退出言出</button>
-        <span class="hint" id="logHint">退出时会卸载本地润色模型</span>
-      </div>
-      <pre id="logView" class="log-view">展开后点「刷新」读取最近日志…</pre>
-    </details>
-  </section>
+        <div class="card">
+          <div class="card-head">
+            <h2 class="card-title">开关</h2>
+            <span class="tag subtle">即时生效</span>
+          </div>
+          <div class="row">
+            <div class="label">
+              <strong>语音听写</strong>
+              <span>关闭后触发键不再触发录音</span>
+            </div>
+            <label class="switch"><input type="checkbox" id="dictation" aria-label="语音听写" /><span class="slider"></span></label>
+          </div>
+          <div class="row">
+            <div class="label">
+              <strong>润色</strong>
+              <span>去口头语、修标点、纠术语</span>
+            </div>
+            <label class="switch"><input type="checkbox" id="polish" aria-label="润色" /><span class="slider"></span></label>
+          </div>
+          <div class="row">
+            <div class="label">
+              <strong>深度整理</strong>
+              <span id="deepHint">改写与分点，多等 1–2 秒</span>
+            </div>
+            <label class="switch"><input type="checkbox" id="deep" aria-label="深度整理" /><span class="slider"></span></label>
+          </div>
+        </div>
 
-  <!-- 模型：本地识别模型 + 润色模型 / API 配置 -->
-  <section class="pane" id="pane-models" role="tabpanel" aria-labelledby="tab-models">
-    <h3 class="section-title">语音识别模型</h3>
-    <div class="card meta">
-      <div class="kv"><span>当前使用</span><b id="asrCurrent">—</b></div>
-      <div class="kv"><span>模型目录</span><b id="asrDir" class="path">—</b></div>
-    </div>
-    <div id="asrModels" class="model-list"></div>
-    <p class="hint model-tip" id="asrHint">切换识别模型会重新加载模型；正在录音时会先结束当前这一轮。</p>
+        <div class="card">
+          <div class="card-head">
+            <h2 class="card-title">输入方式</h2>
+            <span class="tag subtle">保存后生效</span>
+          </div>
+          <div class="row">
+            <div class="label">
+              <strong>输入模式</strong>
+              <span>按住：松手结束；按一下：再按一次或 Esc 结束</span>
+            </div>
+            <div class="segmented" id="modeSeg" role="radiogroup" aria-label="输入模式">
+              <button class="seg active" type="button" data-mode="hold" role="radio" aria-checked="true">按住说话</button>
+              <button class="seg" type="button" data-mode="toggle" role="radio" aria-checked="false">按一下开始</button>
+            </div>
+          </div>
+          <div class="row">
+            <div class="label">
+              <strong>触发键</strong>
+              <span>点按钮后按组合键；单键会被应用接管</span>
+            </div>
+            <button id="captureKey" class="capture" type="button" title="支持组合键、单键和长按；Esc 保留给结束录音">右 Alt</button>
+          </div>
+          <div class="row">
+            <div class="label">
+              <strong>长按触发</strong>
+              <span>避免误触，未到时间松开会被忽略</span>
+            </div>
+            <select id="longPress" aria-label="长按触发时间">
+              <option value="0">立即触发</option>
+              <option value="200">200 ms</option>
+              <option value="350">350 ms</option>
+              <option value="500">500 ms</option>
+            </select>
+          </div>
+          <div class="card-foot">
+            <span class="hint" id="triggerHint"></span>
+            <button id="resetTrigger" class="ghost" type="button">恢复默认</button>
+            <button id="saveTrigger" class="primary" type="button">保存输入设置</button>
+          </div>
+        </div>
 
-    <h3 class="section-title">润色模型 / API</h3>
-    <div class="toolbar">
-      <button id="addPolishProfile" class="primary" type="button">新增配置</button>
-      <button id="refreshOllama" class="ghost" type="button">刷新本地 Ollama 模型</button>
-      <span class="hint" id="modelsHint"></span>
-    </div>
-    <div id="polishProfiles" class="model-list"></div>
-    <p class="hint model-tip" id="polishTip">本地 Ollama 和 OpenAI 兼容 API 都可以保存成配置，点「使用」立即切换；当前启用项会写进 llm.json。</p>
+        <div class="card">
+          <div class="card-head">
+            <h2 class="card-title">气泡外观</h2>
+            <span class="tag subtle">保存后生效</span>
+          </div>
+          <div class="bubble-preview" id="bubblePreview">
+            <span class="preview-caption">实时预览</span>
+            <div class="bp-card" id="bpCard">示例：把这段逻辑抽成一个 helper 函数，然后重启服务。</div>
+          </div>
+          <div class="field-grid">
+            <label class="field">
+              <span class="field-label">宽度</span>
+              <span class="input-unit">
+                <input type="number" id="bubbleWidth" min="320" max="900" step="10" />
+                <span class="unit">px</span>
+              </span>
+            </label>
+            <label class="field">
+              <span class="field-label">高度</span>
+              <span class="input-unit">
+                <input type="number" id="bubbleHeight" min="80" max="360" step="4" />
+                <span class="unit">px</span>
+              </span>
+            </label>
+            <label class="field">
+              <span class="field-label">字号</span>
+              <span class="input-unit">
+                <input type="number" id="bubbleFont" min="9" max="16" step="0.5" />
+                <span class="unit">px</span>
+              </span>
+            </label>
+          </div>
+          <div class="card-foot">
+            <span class="hint" id="bubbleHint"></span>
+            <button id="resetBubbleUi" class="ghost" type="button">恢复默认</button>
+            <button id="saveBubbleUi" class="primary" type="button">保存外观</button>
+          </div>
+        </div>
 
-    <div class="card model-form" id="polishForm" hidden>
-      <h3 id="polishFormTitle">新增润色配置</h3>
-      <div class="row">
-        <div class="label"><strong>名称</strong><span>给这套配置起个名字</span></div>
-        <input id="profileName" class="model-input" type="text" placeholder="例如：本地 Qwen / DeepSeek" />
-      </div>
-      <div class="row">
-        <div class="label"><strong>类型</strong><span>本地 Ollama 走原生接口；API 走 OpenAI 兼容接口</span></div>
-        <select id="profileProvider" class="model-input">
-          <option value="ollama">本地 Ollama</option>
-          <option value="openai">OpenAI 兼容 API</option>
-        </select>
-      </div>
-      <div class="row">
-        <div class="label"><strong>接口地址</strong><span>本地默认 http://127.0.0.1:11434/v1</span></div>
-        <input id="profileUrl" class="model-input" type="text" placeholder="http://127.0.0.1:11434/v1" />
-      </div>
-      <div class="row">
-        <div class="label"><strong>模型名</strong><span id="profileModelHint">例如 qwen3.5:2b；可点「刷新本地 Ollama 模型」</span></div>
-        <input id="profileModel" class="model-input" type="text" list="ollamaModels" placeholder="qwen3.5:2b" />
-        <datalist id="ollamaModels"></datalist>
-      </div>
-      <div class="row">
-        <div class="label"><strong>API Key</strong><span>本地 Ollama 可留空；API 填 Bearer key</span></div>
-        <input id="profileKey" class="model-input" type="password" placeholder="sk-…" autocomplete="off" />
-      </div>
-      <div class="row">
-        <div class="label"><strong>超时</strong><span>单次润色最多等多久（毫秒）</span></div>
-        <input id="profileTimeout" class="model-input" type="number" min="300" max="30000" step="100" value="900" />
-      </div>
-      <div class="toolbar">
-        <button id="savePolishProfile" class="primary" type="button">保存配置</button>
-        <button id="cancelPolishProfile" class="ghost" type="button">取消</button>
-        <button id="testPolishProfile" class="ghost" type="button">测试连接</button>
-        <span class="hint" id="profileHint"></span>
-      </div>
-    </div>
-  </section>
+        <details class="card">
+          <summary class="card-head">
+            <svg class="chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg>
+            <h2 class="card-title">高级 · 试一段润色</h2>
+            <span class="tag subtle">规则 / 大模型对比</span>
+          </summary>
+          <div class="card-body">
+            <textarea id="polishInput" class="polish-input" spellcheck="false" placeholder="粘一段识别出来的原始文本，看看润色前后差别"></textarea>
+            <div class="compare">
+              <div class="col">
+                <h3>规则层</h3>
+                <pre id="outRuled">—</pre>
+              </div>
+              <div class="col">
+                <h3>最终（可能含大润色）</h3>
+                <pre id="outFinal">—</pre>
+              </div>
+            </div>
+          </div>
+          <div class="card-foot">
+            <span class="hint" id="polishHint"></span>
+            <button id="runRules" class="ghost" type="button">只走规则</button>
+            <button id="runBoth" class="primary" type="button">带大润色</button>
+            <button id="runDeep" class="ghost" type="button">深度整理</button>
+          </div>
+        </details>
 
-  <!-- 历史 -->
-  <section class="pane" id="pane-history" role="tabpanel" aria-labelledby="tab-history">
-    <div class="toolbar">
-      <select id="historyDate" class="date" title="选日期"></select>
-      <input id="historySearch" class="search" type="search" placeholder="搜索记录" aria-label="搜索记录" />
-      <button id="refreshHistory">刷新</button>
-      <button id="clearHistory" class="ghost">清空这一天</button>
-      <span class="hint" id="historyHint">每次落字都会记一笔，按天存在本机</span>
-    </div>
-    <p class="legend">
-      点「对比」展开逐字差异：
-      <span class="del">红字=删掉</span><span class="ins">绿字=新增</span>
-    </p>
-    <div id="historyList" class="list"></div>
-  </section>
+        <details class="card dev" id="devPanel">
+          <summary class="card-head">
+            <svg class="chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg>
+            <h2 class="card-title">开发者工具</h2>
+            <span class="tag subtle">日志 · 退出</span>
+          </summary>
+          <div class="card-body">
+            <pre id="logView" class="log-view">展开后点「刷新」读取最近日志…</pre>
+          </div>
+          <div class="card-foot">
+            <span class="hint" id="logHint"></span>
+            <button id="logCopy" class="ghost" type="button">复制</button>
+            <button id="logClear" class="ghost" type="button">清空</button>
+            <button id="logRefresh" class="ghost" type="button">刷新</button>
+            <button id="quitApp" class="ghost danger-text" type="button" title="退出言出（会卸载本地润色模型）">退出言出</button>
+          </div>
+        </details>
+      </section>
 
-  <!-- 词表 / 替换规则 -->
-  <section class="pane" id="pane-glossary" role="tabpanel" aria-labelledby="tab-glossary">
-    <div class="card glossary-add">
-      <div class="glossary-add-head">
-        <strong>加一个词</strong>
-        <span class="hint">正确写法是最终要出现的字；会被误读成是模型常听错的写法，可以留空。</span>
-      </div>
-      <div class="glossary-add-fields">
-        <label class="glossary-field">
-          <span class="field-label">正确写法</span>
-          <input id="newGlossaryWord" type="text" placeholder="例如：入参 / helper" autocomplete="off" />
-        </label>
-        <label class="glossary-field">
-          <span class="field-label">会被误读成 <em>可选</em></span>
-          <input id="newGlossaryMisread" type="text" placeholder="例如：入餐 / Helber" autocomplete="off" />
-        </label>
-        <button id="addGlossary" type="button" class="primary">添加</button>
-      </div>
-      <p class="hint glossary-tip" id="addHint">留空「会被误读成」时，系统会按相近的拼写 / 发音自动纠正。</p>
-    </div>
+      <!-- 模型：本地识别模型 + 润色模型 / API 配置 -->
+      <section class="pane" id="pane-models" role="tabpanel" aria-labelledby="tab-models">
+        <div class="pane-head">
+          <div>
+            <h2>模型</h2>
+            <p>切换识别引擎，管理润色 API 配置</p>
+          </div>
+        </div>
 
-    <div class="toolbar">
-      <input id="glossarySearch" class="search" type="search" placeholder="搜索词条" aria-label="搜索词条" />
-      <button id="saveGlossary">保存词表</button>
-      <span class="hint" id="glossaryHint">正确写法是最终落字的写法；会被误读成是模型常听错的写法。</span>
-    </div>
-    <div id="glossaryTable" class="vtable"></div>
+        <div class="card">
+          <div class="card-head">
+            <h2 class="card-title">语音识别</h2>
+            <span class="tag" id="asrCurrent">—</span>
+          </div>
+          <div class="path-row">
+            <span>模型目录</span>
+            <b id="asrDir" class="path">—</b>
+          </div>
+          <div id="asrModels" class="model-list"></div>
+          <div class="card-foot">
+            <span class="hint model-tip" id="asrHint"></span>
+          </div>
+        </div>
 
-    <details class="source">
-      <summary>源码模式（批量粘贴用）</summary>
-      <textarea id="glossaryText" spellcheck="false" placeholder="helper&#10;入餐=入参&#10;负在均衡=负载均衡"></textarea>
-      <div class="toolbar">
-        <button id="applyGlossarySource" class="ghost" type="button">从源码载入表格</button>
-        <span class="hint">每行一个词；显式纠错写「会被误读成=正确写法」。</span>
-      </div>
-    </details>
+        <div class="card">
+          <div class="card-head">
+            <h2 class="card-title">润色模型 / API</h2>
+            <div class="card-actions">
+              <button id="refreshOllama" class="ghost" type="button">刷新本地模型</button>
+              <button id="addPolishProfile" class="primary" type="button">新增配置</button>
+            </div>
+          </div>
+          <div id="polishProfiles" class="model-list"></div>
+          <div class="card-foot">
+            <span class="hint" id="modelsHint"></span>
+          </div>
+        </div>
 
-    <details class="source rules-source">
-      <summary>替换规则（高级）</summary>
-      <div class="toolbar">
-        <span class="hint">替换规则：<code>旧=新</code>，命中就换，不做模糊匹配（跑在热词表之后、标点整理之前）</span>
-        <button id="saveRules">保存规则</button>
-      </div>
-      <textarea id="rulesText" spellcheck="false" placeholder="入餐=入参&#10;负在均衡=负载均衡"></textarea>
-      <p class="hint" id="rulesHint">一行一条；# 开头是注释。</p>
-    </details>
-  </section>
+        <div class="card model-form" id="polishForm" hidden>
+          <div class="card-head">
+            <h2 class="card-title" id="polishFormTitle">新增润色配置</h2>
+          </div>
+          <div class="form-grid">
+            <label class="field">
+              <span class="field-label">名称</span>
+              <input id="profileName" type="text" placeholder="例如：本地 Qwen / DeepSeek" />
+            </label>
+            <label class="field">
+              <span class="field-label">类型</span>
+              <select id="profileProvider">
+                <option value="ollama">本地 Ollama</option>
+                <option value="openai">OpenAI 兼容 API</option>
+              </select>
+            </label>
+            <label class="field span-2">
+              <span class="field-label">接口地址</span>
+              <input id="profileUrl" type="text" placeholder="http://127.0.0.1:11434/v1" />
+            </label>
+            <label class="field">
+              <span class="field-label">模型名</span>
+              <input id="profileModel" type="text" list="ollamaModels" placeholder="qwen3.5:2b" />
+              <span class="field-help" id="profileModelHint">例如 qwen3.5:2b</span>
+            </label>
+            <label class="field">
+              <span class="field-label">超时</span>
+              <span class="input-unit">
+                <input id="profileTimeout" type="number" min="300" max="30000" step="100" value="900" />
+                <span class="unit">ms</span>
+              </span>
+            </label>
+            <label class="field span-2">
+              <span class="field-label">API Key</span>
+              <input id="profileKey" type="password" placeholder="sk-…" autocomplete="off" />
+            </label>
+            <datalist id="ollamaModels"></datalist>
+          </div>
+          <div class="card-foot">
+            <span class="hint" id="profileHint"></span>
+            <button id="testPolishProfile" class="ghost" type="button">测试连接</button>
+            <button id="cancelPolishProfile" class="ghost" type="button">取消</button>
+            <button id="savePolishProfile" class="primary" type="button">保存配置</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- 历史 -->
+      <section class="pane" id="pane-history" role="tabpanel" aria-labelledby="tab-history">
+        <div class="pane-head">
+          <div>
+            <h2>历史</h2>
+            <p>每次落字都会记一笔，只保存在本机</p>
+          </div>
+        </div>
+
+        <div class="toolbar">
+          <div class="search-field">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m16.5 16.5 4 4"/></svg>
+            <input id="historySearch" class="search" type="search" placeholder="搜索记录" aria-label="搜索记录" />
+          </div>
+          <select id="historyDate" aria-label="选择日期" title="选日期"></select>
+          <button id="refreshHistory" type="button">刷新</button>
+          <button id="clearHistory" class="danger-text" type="button">清空这一天</button>
+        </div>
+        <div class="toolbar-note">
+          <span class="legend">对比：<span class="del">红字删除</span><span class="ins">绿字新增</span></span>
+          <span class="hint" id="historyHint"></span>
+        </div>
+        <div id="historyList" class="list"></div>
+      </section>
+
+      <!-- 词表 / 替换规则 -->
+      <section class="pane" id="pane-glossary" role="tabpanel" aria-labelledby="tab-glossary">
+        <div class="pane-head">
+          <div>
+            <h2>词表</h2>
+            <p>热词优先纠正；替换规则命中即改</p>
+          </div>
+          <span class="tag" id="glossaryCount">0 条</span>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <h2 class="card-title">添加词条</h2>
+          </div>
+          <div class="glossary-add-fields">
+            <label class="glossary-field">
+              <span class="field-label">正确写法</span>
+              <input id="newGlossaryWord" type="text" placeholder="例如：入参 / helper" autocomplete="off" />
+            </label>
+            <label class="glossary-field">
+              <span class="field-label">会被误读成 <em>可选</em></span>
+              <input id="newGlossaryMisread" type="text" placeholder="例如：入餐 / Helber" autocomplete="off" />
+            </label>
+            <button id="addGlossary" class="primary" type="button">添加</button>
+          </div>
+          <div class="card-foot">
+            <span class="hint glossary-tip" id="addHint">留空时按相近的拼写 / 发音自动纠正。</span>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <h2 class="card-title">全部词条</h2>
+            <div class="card-actions">
+              <div class="search-field compact">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m16.5 16.5 4 4"/></svg>
+                <input id="glossarySearch" class="search" type="search" placeholder="搜索词条" aria-label="搜索词条" />
+              </div>
+              <button id="saveGlossary" class="primary" type="button">保存词表</button>
+            </div>
+          </div>
+          <div id="glossaryTable" class="vtable"></div>
+          <div class="card-foot">
+            <span class="hint" id="glossaryHint">修改后点「保存词表」生效。</span>
+          </div>
+        </div>
+
+        <details class="card">
+          <summary class="card-head">
+            <svg class="chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg>
+            <h2 class="card-title">高级 · 源码与替换规则</h2>
+            <span class="tag subtle">批量粘贴</span>
+          </summary>
+          <div class="card-body">
+            <div class="subhead">
+              <strong>源码模式</strong>
+              <span class="hint">每行一个词；显式纠错写「会被误读成=正确写法」</span>
+            </div>
+            <textarea id="glossaryText" spellcheck="false" placeholder="helper&#10;入餐=入参&#10;负在均衡=负载均衡"></textarea>
+            <div class="sub-actions">
+              <span class="hint"></span>
+              <button id="applyGlossarySource" class="ghost" type="button">从源码载入表格</button>
+            </div>
+            <div class="divider"></div>
+            <div class="subhead">
+              <strong>替换规则</strong>
+              <span class="hint"><code>旧=新</code>，命中就换，不做模糊匹配</span>
+            </div>
+            <textarea id="rulesText" spellcheck="false" placeholder="入餐=入参&#10;负在均衡=负载均衡"></textarea>
+            <div class="sub-actions">
+              <span class="hint" id="rulesHint">一行一条；# 开头是注释。</span>
+              <button id="saveRules" class="primary" type="button">保存规则</button>
+            </div>
+          </div>
+        </details>
+      </section>
+    </main>
+  </div>
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
 

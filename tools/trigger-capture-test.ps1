@@ -2,6 +2,8 @@
 # 打开设置 → 点「触发键」→ 按 Ctrl+Shift+Space → 截图 → 点保存 → 读回 trigger.json → 恢复原配置。
 $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [Text.Encoding]::UTF8
+Add-Type -AssemblyName UIAutomationClient
+Add-Type -AssemblyName UIAutomationTypes
 
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 $exe = Join-Path $root 'app\src-tauri\target\debug\yanchu.exe'
@@ -25,6 +27,7 @@ public static class TC {
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetWindowText(IntPtr h, StringBuilder sb, int max);
     [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
     [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr h, IntPtr after, int x, int y, int cx, int cy, uint flags);
+    [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
     [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int cmd);
     [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r);
     [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
@@ -62,6 +65,11 @@ public static class TC {
         System.Threading.Thread.Sleep(45);
     }
 
+    public static void Wheel(int delta) {
+        mouse_event(0x0800, 0, 0, (uint)delta, UIntPtr.Zero);
+        System.Threading.Thread.Sleep(180);
+    }
+
     public static void Shot(IntPtr h, string path) {
         RECT r; GetWindowRect(h, out r);
         int w = r.Right - r.Left, ht = r.Bottom - r.Top;
@@ -89,27 +97,62 @@ Get-Process -Name yanchu -ErrorAction SilentlyContinue | Stop-Process -Force
 Start-Sleep -Milliseconds 400
 Remove-Item $log -ErrorAction SilentlyContinue
 
+function Find-Button([IntPtr]$hwnd, [string]$name) {
+  $rootEl = [System.Windows.Automation.AutomationElement]::FromHandle($hwnd)
+  $typeCond = [System.Windows.Automation.PropertyCondition]::new(
+    [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+    [System.Windows.Automation.ControlType]::Button)
+  for ($i = 0; $i -lt 6; $i++) {
+    $cond = [System.Windows.Automation.AndCondition]::new(
+      [System.Windows.Automation.PropertyCondition]::new(
+        [System.Windows.Automation.AutomationElement]::NameProperty, $name),
+      $typeCond)
+    $b = $rootEl.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $cond)
+    if ($null -ne $b) { return $b }
+    Start-Sleep -Milliseconds 400
+  }
+  return $null
+}
+
+function Click-Button($b) {
+  # UIA 只用来定位；真正用鼠标点，WebView 才会拿到键盘焦点。
+  for ($i = 0; $i -lt 8 -and $b.Current.IsOffscreen; $i++) {
+    [TC]::Wheel(-120)
+    Start-Sleep -Milliseconds 200
+  }
+  $br = $b.Current.BoundingRectangle
+  [TC]::ClickAt([int]($br.X + $br.Width / 2), [int]($br.Y + $br.Height / 2))
+}
+
 $env:YANCHU_OPEN_PANEL = '1'
+$env:YANCHU_PANEL_TAB = 'settings'
 $app = Start-Process -FilePath $exe -PassThru -RedirectStandardError $log -WindowStyle Hidden
-Start-Sleep -Seconds 5
+Start-Sleep -Seconds 2
 
 $panel = [IntPtr]::Zero
 try {
-    $panel = [TC]::FindByTitle('言出 · 控制面板', $app.Id)
+    for ($i = 0; $i -lt 36 -and $panel -eq [IntPtr]::Zero; $i++) {
+        $panel = [TC]::FindByTitle('言出 · 控制面板', $app.Id)
+        if ($panel -eq [IntPtr]::Zero) { Start-Sleep -Milliseconds 500 }
+    }
     if ($panel -eq [IntPtr]::Zero) { throw '没找到控制面板' }
     [TC]::Topmost($panel, $true)
-    Start-Sleep -Milliseconds 600
+    [void][TC]::SetForegroundWindow($panel)
+    Start-Sleep -Milliseconds 900
 
+    # 输入方式卡在首屏下方；滚到它，截图里才看得到触发键行。
     $r = New-Object TC+RECT
     [void][TC]::GetWindowRect($panel, [ref]$r)
     $w = $r.Right - $r.Left
     $h = $r.Bottom - $r.Top
-    $px = { param($fx, $fy) [int]($r.Left + $w * $fx), [int]($r.Top + $h * $fy) }
+    [TC]::SetCursorPos([int]($r.Left + $w * 0.65), [int]($r.Top + $h * 0.5))
+    for ($i = 0; $i -lt 4; $i++) { [TC]::Wheel(-120) }
+    Start-Sleep -Milliseconds 500
 
-    # 控制面板默认就打开在「设置」页，不用再点页签
-    $p = & $px 0.813 0.358
-    Write-Host ("点击触发键按钮: {0},{1}" -f $p[0], $p[1])
-    [TC]::ClickAt($p[0], $p[1])
+    $cap = Find-Button $panel '右 Alt'
+    if ($null -eq $cap) { throw '找不到触发键按钮' }
+    Write-Host '点击触发键按钮'
+    Click-Button $cap
     Start-Sleep -Milliseconds 500
 
     [TC]::Key(0xA2, $true)   # Ctrl
@@ -123,9 +166,10 @@ try {
     [TC]::Shot($panel, $shotCaptured)
     Write-Host "录入后截图: $shotCaptured"
 
-    $p = & $px 0.096 0.552
-    Write-Host ("点击保存: {0},{1}" -f $p[0], $p[1])
-    [TC]::ClickAt($p[0], $p[1])
+    $save = Find-Button $panel '保存输入设置'
+    if ($null -eq $save) { throw '找不到保存输入设置按钮' }
+    Write-Host '点击保存输入设置'
+    Click-Button $save
     Start-Sleep -Milliseconds 1500
     [TC]::Shot($panel, $shotSaved)
     Write-Host "保存后截图: $shotSaved"
@@ -144,6 +188,7 @@ try {
 } finally {
     if ($panel -ne [IntPtr]::Zero) { [TC]::Topmost($panel, $false) }
     $env:YANCHU_OPEN_PANEL = $null
+    $env:YANCHU_PANEL_TAB = $null
     Get-Process -Id $app.Id -ErrorAction SilentlyContinue | Stop-Process -Force
     if ($existed -and (Test-Path $backup)) {
         Move-Item $backup $triggerPath -Force

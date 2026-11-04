@@ -38,3 +38,4 @@ Thumbs.db
 
 # 真人语料音频（本地录制，不进仓库；prompts.txt 保留）
 bench/real/*.wav
+tools/.lat-*.wav

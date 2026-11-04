@@ -85,34 +85,33 @@ Start-Sleep -Milliseconds 400
 Remove-Item $log -ErrorAction SilentlyContinue
 
 $env:YANCHU_OPEN_PANEL = '1'
+# 新面板的导航在左侧，坐标点击容易漂；直接让 Rust 侧在页面加载后切页签。
+$env:YANCHU_PANEL_TAB = $Tab
 $app = Start-Process -FilePath $exe -PassThru -RedirectStandardError $log -WindowStyle Hidden
-Start-Sleep -Seconds 5
+Start-Sleep -Seconds 2
 
 $panel = [IntPtr]::Zero
 try {
-    $panel = [PS]::FindByTitle('言出 · 控制面板', $app.Id)
-    if ($panel -eq [IntPtr]::Zero) { throw 'panel not found' }
-    [PS]::Topmost($panel, $true)
-    Start-Sleep -Milliseconds 700
-
-    if ($Tab -ne 'settings') {
-        $r = New-Object PS+RECT
-        [void][PS]::GetWindowRect($panel, [ref]$r)
-        # 四个页签右对齐：词表最右，历史、模型、设置往左
-        $fx = if ($Tab -eq 'glossary') { 0.932 } elseif ($Tab -eq 'history') { 0.865 } else { 0.79 }
-        $x = [int]($r.Left + ($r.Right - $r.Left) * $fx)
-        $y = [int]($r.Top + ($r.Bottom - $r.Top) * 0.095)
-        [PS]::ClickAt($x, $y)
-        Start-Sleep -Milliseconds 350
-        [PS]::ClickAt($x, $y)
-        Write-Host "click $Tab at $x,$y"
+    # 首次启动要加载识别模型，面板窗口可能比固定等待更晚出现；轮询到 20 秒。
+    for ($i = 0; $i -lt 36 -and $panel -eq [IntPtr]::Zero; $i++) {
+        $panel = [PS]::FindByTitle('言出 · 控制面板', $app.Id)
+        if ($panel -eq [IntPtr]::Zero) { Start-Sleep -Milliseconds 500 }
     }
+    if ($panel -eq [IntPtr]::Zero) {
+        $alive = Get-Process -Id $app.Id -ErrorAction SilentlyContinue
+        Write-Host "panel not found (pid=$($app.Id), alive=$([bool]$alive))"
+        if (Test-Path $log) { Get-Content $log -Tail 20 }
+        throw 'panel not found'
+    }
+    [PS]::Topmost($panel, $true)
+    Start-Sleep -Milliseconds 900
 
     [PS]::Shot($panel, $Out)
-    Write-Host "screenshot: $Out"
+    Write-Host "screenshot: $Out ($Tab)"
 } finally {
     if ($panel -ne [IntPtr]::Zero) { [PS]::Topmost($panel, $false) }
     $env:YANCHU_OPEN_PANEL = $null
+    $env:YANCHU_PANEL_TAB = $null
     Get-Process -Id $app.Id -ErrorAction SilentlyContinue | Stop-Process -Force
     Remove-Item $log -Force -ErrorAction SilentlyContinue
 }

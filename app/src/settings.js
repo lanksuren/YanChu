@@ -13,7 +13,9 @@ function activateTab(btn) {
   btn.classList.add('active');
   btn.setAttribute('aria-selected', 'true');
   btn.tabIndex = 0;
-  document.getElementById(`pane-${btn.dataset.tab}`).classList.add('active');
+  const pane = document.getElementById(`pane-${btn.dataset.tab}`);
+  pane.classList.add('active');
+  pane.scrollTop = 0;
 
   if (btn.dataset.tab === 'history') loadHistory();
   if (btn.dataset.tab === 'models') loadModels();
@@ -37,13 +39,14 @@ document.querySelectorAll('.tab').forEach((btn) => {
   btn.addEventListener('click', () => activateTab(btn));
 });
 
-// 左右键切换页签（WAI-ARIA tabs 的基本交互）
+// 方向键切换页签（WAI-ARIA tabs 的基本交互；侧边栏是纵向的）
 document.querySelector('.tabs').addEventListener('keydown', (e) => {
-  if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+  if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) return;
   const tabs = [...document.querySelectorAll('.tab')];
   const i = tabs.indexOf(document.activeElement);
   if (i < 0) return;
-  const next = tabs[(i + (e.key === 'ArrowRight' ? 1 : tabs.length - 1)) % tabs.length];
+  const forward = e.key === 'ArrowRight' || e.key === 'ArrowDown';
+  const next = tabs[(i + (forward ? 1 : tabs.length - 1)) % tabs.length];
   next.focus();
   next.click();
   e.preventDefault();
@@ -70,8 +73,8 @@ function applyState(state) {
   deep.checked = state.deep && state.deep_available;
   deep.disabled = !state.deep_available;
   document.getElementById('deepHint').textContent = state.deep_available
-    ? '允许改写与分点，松手后多等 1–2 秒'
-    : '需要配置云端 API 模型（本地模型只有一套提示词）';
+    ? '改写与分点，多等 1–2 秒'
+    : '需配置云端 API 模型';
 }
 
 async function loadState() {
@@ -79,13 +82,18 @@ async function loadState() {
   applyState(state);
   document.getElementById('engine').textContent =
     state.engine === 'placeholder'
-      ? '占位识别器（构建未启用 asr）'
+      ? '占位识别器'
       : state.engine_label || (state.engine === 'qwen3' ? 'Qwen3-ASR 0.6B' : 'SenseVoice int8');
 
   const llm = await invoke('get_llm_status');
-  document.getElementById('llm').textContent = llm.configured
-    ? `${llm.profile_name || llm.model} @ ${llm.url}`
-    : '未配置（只用规则层）';
+  if (llm.configured) {
+    const name = [llm.profile_name, llm.model].filter(
+      (v, i, all) => v && all.indexOf(v) === i,
+    );
+    document.getElementById('llm').textContent = name.join(' · ') || '已配置';
+  } else {
+    document.getElementById('llm').textContent = '未配置';
+  }
 
   const glossary = await invoke('get_glossary');
   const count = glossary
@@ -207,18 +215,23 @@ function renderHistory() {
   if (!historyEntries.length) {
     const empty = el('div', 'empty');
     empty.append(el('strong', '', '这一天还没有记录'));
-    empty.append(el('p', 'hint', '按住或按一下触发键说一句，文字会落进你刚才的输入框。'));
-    empty.append(el('p', 'hint', '触发键和输入模式可以在「设置」里改。'));
+    empty.append(el('p', 'hint', '按住触发键说一句，文字会落在你刚才的输入框里。'));
     list.append(empty);
+    document.getElementById('historyHint').textContent = '';
     return;
   }
   if (!items.length) {
-    list.append(el('p', 'hint', '没有匹配的记录。'));
+    const empty = el('div', 'empty');
+    empty.append(el('strong', '', '没有匹配的记录'));
+    empty.append(el('p', 'hint', '换个关键词试试。'));
+    list.append(empty);
+    document.getElementById('historyHint').textContent = '0 条';
     return;
   }
   const frag = document.createDocumentFragment();
   for (const e of items) frag.append(buildEntry(e));
   list.append(frag);
+  document.getElementById('historyHint').textContent = q ? `${items.length} 条匹配` : `共 ${items.length} 条`;
 }
 
 function buildEntry(e) {
@@ -472,6 +485,8 @@ function renderGlossary() {
   host.replaceChildren();
   const flags = glossaryDuplicateFlags();
   const q = glossaryQuery.trim().toLowerCase();
+  const count = document.getElementById('glossaryCount');
+  if (count) count.textContent = `${glossaryRows.length} 条`;
 
   const head = el('div', 'vrow head');
   head.append(
@@ -518,7 +533,7 @@ function renderGlossary() {
       setGlossaryHint('有未保存的修改，点「保存词表」生效', '');
     });
 
-    const del = el('button', 'mini', '删除');
+    const del = el('button', 'mini delete', '删除');
     del.type = 'button';
     del.addEventListener('click', () => {
       glossaryRows.splice(idx, 1);
@@ -543,8 +558,8 @@ async function loadGlossary() {
   glossaryRows = splitGlossary(text);
   document.getElementById('glossaryText').value = text;
   renderGlossary();
-  setGlossaryHint('正确写法是最终落字的写法；会被误读成是模型常听错的写法。', '');
-  setAddHint('留空「会被误读成」时，系统会按相近的拼写 / 发音自动纠正。', '');
+  setGlossaryHint('修改后点「保存词表」生效。', '');
+  setAddHint('留空时按相近的拼写 / 发音自动纠正。', '');
   document.getElementById('rulesText').value = await invoke('get_rules');
 }
 
@@ -637,7 +652,7 @@ document.getElementById('saveGlossary').addEventListener('click', async (ev) => 
   renderGlossary();
   document.getElementById('glossaryText').value = text;
   setGlossaryHint(`已保存 ${n} 条，下一次落字生效。`, 'ok');
-  setAddHint('留空「会被误读成」时，系统会按相近的拼写 / 发音自动纠正。', '');
+  setAddHint('留空时按相近的拼写 / 发音自动纠正。', '');
   toast(merged ? `已保存 ${n} 条，合并了 ${merged} 条重复` : `已保存 ${n} 条热词`);
   loadState();
 });
@@ -708,7 +723,7 @@ async function loadBubbleUi() {
   document.getElementById('bubbleFont').value = ui.font_size;
   updateBubblePreview();
   document.getElementById('bubbleHint').textContent =
-    '当前：' + `${ui.width}×${ui.height}，字号 ${ui.font_size}`;
+    `当前 ${ui.width} × ${ui.height} px · 字号 ${ui.font_size}`;
 }
 
 // 所见即所得：数字一改，预览立刻跟着变，不用「说一句试试」
@@ -734,7 +749,7 @@ document.getElementById('saveBubbleUi').addEventListener('click', async (ev) => 
   const fontSize = Number(document.getElementById('bubbleFont').value);
   const ui = await withBusy(btn, '保存中…', () => invoke('save_ui', { width, height, fontSize }));
   document.getElementById('bubbleHint').textContent =
-    `已保存：${ui.width}×${ui.height}，字号 ${ui.font_size}`;
+    `已保存 ${ui.width} × ${ui.height} px · 字号 ${ui.font_size}`;
   toast('气泡外观已保存');
 });
 
@@ -1179,9 +1194,7 @@ async function loadModels() {
 
 function renderAsrModels() {
   const asr = modelState.asr || {};
-  document.getElementById('asrCurrent').textContent = asr.label
-    ? `${asr.label}（${asr.engine}）`
-    : '—';
+  document.getElementById('asrCurrent').textContent = asr.label || '—';
   document.getElementById('asrDir').textContent = asr.dir || '—';
 
   const host = document.getElementById('asrModels');
@@ -1197,11 +1210,12 @@ function renderAsrModels() {
     main.append(head, el('p', 'model-meta', model.dir));
 
     const actions = el('div', 'model-actions');
-    const button = el('button', 'mini', model.active ? '使用中' : '切换');
-    button.type = 'button';
-    button.disabled = model.active || !model.available;
-    button.addEventListener('click', () => switchAsrModel(model));
-    actions.append(button);
+    if (!model.active && model.available) {
+      const button = el('button', 'mini', '切换');
+      button.type = 'button';
+      button.addEventListener('click', () => switchAsrModel(model));
+      actions.append(button);
+    }
     row.append(main, actions);
     host.append(row);
   }
@@ -1243,7 +1257,7 @@ function renderPolishProfiles() {
   const active = polish.active || '';
 
   if (!(polish.profiles || []).length) {
-    host.append(el('div', 'model-empty', '还没有润色配置。点「新增配置」添加本地 Ollama 或 API。'));
+    host.append(el('div', 'model-empty', '还没有润色配置，点右上角「新增配置」添加本地 Ollama 或 API。'));
     return;
   }
 
@@ -1295,7 +1309,7 @@ function renderPolishProfiles() {
     edit.type = 'button';
     edit.addEventListener('click', () => openProfileForm(profile));
 
-    const del = el('button', 'mini', '删除');
+    const del = el('button', 'mini delete', '删除');
     del.type = 'button';
     del.addEventListener('click', () => {
       if (deleteProfileId === profile.id) {
@@ -1375,7 +1389,7 @@ function updateProfileProviderHints() {
   if (!current || current === other) url.value = PROFILE_DEFAULTS[provider];
   document.getElementById('profileModelHint').textContent =
     provider === 'ollama'
-      ? '例如 qwen3.5:2b；可点「刷新本地 Ollama 模型」'
+      ? '例如 qwen3.5:2b；可点「刷新本地模型」'
       : '例如 deepseek-chat / gpt-4o-mini';
   document.getElementById('profileKey').placeholder =
     provider === 'ollama' ? '本地 Ollama 可留空' : 'sk-…';
@@ -1397,7 +1411,8 @@ function openProfileForm(profile) {
   setProfileHint('');
   const form = document.getElementById('polishForm');
   form.hidden = false;
-  form.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  form.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  if (!profile) document.getElementById('profileName').focus();
 }
 
 function closeProfileForm() {
@@ -1540,22 +1555,21 @@ async function loadDiagnostics() {
     const retry = document.getElementById('retryMic');
     if (retry && retry.hidden !== d.mic) retry.hidden = d.mic;
 
-    const asrLabel = d.asr_label || '识别模型';
     if (d.placeholder) {
       setDot('dotAsr', 'err');
-      setText('txtAsr', '占位识别器（构建未启用 asr）');
+      setText('txtAsr', '占位识别器');
     } else if (!d.asr_available) {
       setDot('dotAsr', 'err');
-      setText('txtAsr', `${asrLabel} · 模型文件不完整`);
+      setText('txtAsr', '缺文件');
     } else if (d.asr === 'ready') {
       setDot('dotAsr', 'ok');
-      setText('txtAsr', `${asrLabel} · 就绪`);
+      setText('txtAsr', '就绪');
     } else if (d.asr === 'busy') {
       setDot('dotAsr', 'wait');
-      setText('txtAsr', `${asrLabel} · 识别中…`);
+      setText('txtAsr', '识别中');
     } else {
       setDot('dotAsr', 'wait');
-      setText('txtAsr', `${asrLabel} · 预热中…`);
+      setText('txtAsr', '预热中');
     }
 
     setDot('dotHotkey', d.hotkey ? 'ok' : 'err');
@@ -1565,7 +1579,7 @@ async function loadDiagnostics() {
     );
 
     setDot('dotPolish', d.deep ? 'ok' : 'warn');
-    setText('txtPolish', d.deep ? '深度可用' : '标准（未配置云端）');
+    setText('txtPolish', d.deep ? '深度可用' : '仅标准档');
   } catch (e) {
     console.error('读取诊断状态失败', e);
   }
