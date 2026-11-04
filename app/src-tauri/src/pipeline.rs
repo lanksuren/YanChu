@@ -127,6 +127,12 @@ impl Pipeline {
         let llm_input: &str = if prefer_corrected { &corrected } else { &ruled };
 
         let attempt = match &self.llm {
+            // 短句 + 规则层已经干净 → 不打扰模型。依据见 `settled_enough` 的注释：
+            // 这类文本在实测里模型改了等于没改，却要等 400–600ms。
+            Some(cfg) if cfg.is_local() && settled_enough(llm_input) => {
+                log::info!("大润色跳过：短句且规则层已干净（{llm_input}）");
+                llm::LlmAttempt::skipped(depth)
+            }
             Some(cfg) => llm::polish(llm_input, cfg, depth),
             None => LlmAttempt::skipped(depth),
         };
@@ -164,6 +170,88 @@ impl Pipeline {
         }
         (stages.final_text, stages.fixes)
     }
+}
+
+/// 短句 + 规则层已经干净 → 不值得等一次大润色。
+///
+/// 依据（2026-11-04 实测，本机 qwen3.5:2b，`--polish-test` 与 devlog 对拍）：
+///
+/// * 27 字的真实会话连续 7 次，模型输出与规则层**逐字相同**，每次却要等 500–600ms；
+/// * 8 条多样短句里，模型真正改对的只有三类：
+///   补问号（「…是为什么？」）、删句首的「这个/那个」口头语、一口气说话时补连接词前的逗号 ——
+///   而这三类恰好是规则层现在做不到、只有模型能做的；
+/// * 反过来说，**只要这三类症状一个都不出现**，短句交给模型就是纯等待。
+///
+/// 所以判据不是「字数少于 N」，而是「规则层收拾完了没有」：
+/// 有症状就交给模型，没症状就省掉这 400ms。长文本一律交给模型（分段、整理有价值）。
+fn settled_enough(text: &str) -> bool {
+    if !short_skip_enabled() {
+        return false;
+    }
+    if text.chars().count() >= SETTLED_MAX_CHARS {
+        return false;
+    }
+    !has_question_without_mark(text)
+        && !starts_with_demonstrative(text)
+        && !has_run_on_conjunction(text)
+}
+
+/// 超过这个字数就不算「短句」，一律交给大润色。
+const SETTLED_MAX_CHARS: usize = 30;
+
+/// 关掉「短句跳过」：`YANCHU_LLM_SETTLED=0`（做 A/B 用）。
+fn short_skip_enabled() -> bool {
+    !matches!(
+        std::env::var("YANCHU_LLM_SETTLED").ok().as_deref(),
+        Some("0") | Some("off") | Some("false")
+    )
+}
+
+/// 句尾是疑问词却没有问号：「…是为什么。」这种，模型会补成「？」。
+fn has_question_without_mark(text: &str) -> bool {
+    const TAILS: &[&str] = &[
+        "为什么", "怎么样", "怎么办", "是不是", "有没有", "多少", "几点", "多久", "吗", "呢",
+    ];
+    let body = text.trim_end_matches(['。', '，', '、', ' ', '\n']);
+    if body.ends_with('？') || body.ends_with('?') {
+        return false;
+    }
+    TAILS.iter().any(|w| body.ends_with(w))
+}
+
+/// 句首残留的「这个/那个」口头语：「那个他说明天上线」。
+///
+/// 只认后面紧跟人称代词（或再一个指示词）的写法；
+/// 「这个 bug」「这个方案」是指示代词，必须保留，不能当成待收拾的症状。
+fn starts_with_demonstrative(text: &str) -> bool {
+    let chars: Vec<char> = text.trim_start().chars().collect();
+    chars.len() >= 3
+        && (chars[0] == '这' || chars[0] == '那')
+        && chars[1] == '个'
+        && matches!(chars[2], '我' | '你' | '咱' | '他' | '她' | '这' | '那')
+}
+
+/// 一口气说完、连接词前没有标点：「跑完然后重启」。
+///
+/// 只收录「逗号是惯例」的几个；「因为」故意不在里面 ——
+/// 「返回空是因为缓存没命中」不加逗号才是对的。
+fn has_run_on_conjunction(text: &str) -> bool {
+    const CONJ: &[&str] = &["然后", "但是", "所以", "不过", "而且", "另外"];
+    const PUNCT: &[char] = &['，', '。', '？', '！', '、', '；', '：', ',', '?', '!', ';', ':'];
+
+    let chars: Vec<char> = text.chars().collect();
+    for word in CONJ {
+        let w: Vec<char> = word.chars().collect();
+        if chars.len() <= w.len() {
+            continue;
+        }
+        for i in 1..=chars.len() - w.len() {
+            if chars[i..i + w.len()] == w[..] && !PUNCT.contains(&chars[i - 1]) {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 #[cfg(test)]
@@ -208,5 +296,47 @@ mod tests {
         fn raw_free_of_filler(&self) -> bool {
             !self.ruled.starts_with('嗯')
         }
+    }
+
+    /// 2026-11-04 的 8 条实测短句：模型改了 5 条、改了等于没改 3 条。
+    ///
+    /// 判据的要求是：模型改对的那 5 条必须被判成「还没收拾干净」，
+    /// 只有模型纯属白跑的那 3 条才允许跳过 —— 这样跳过就换不来质量损失。
+    #[test]
+    fn settled_gate_matches_measured_value() {
+        let needs_model = [
+            "帮我查一下这个接口返回值为空是为什么。", // 缺问号
+            "这个我们先跑一遍迁移然后重启。",         // 句首这个 + 连接词无标点
+            "我觉得这个方案可以但是需要再确认一下。", // 连接词无标点
+            "先把迁移跑完然后重启服务。",             // 连接词无标点
+            "那个他说明天上线。",                     // 句首那个 + 人称
+        ];
+        for t in needs_model {
+            assert!(!settled_enough(t), "应该交给模型: {t}");
+        }
+
+        let skip_ok = [
+            "这个接口返回空是因为缓存没有命中。",
+            "整一下这个需求。",
+            "这个 bug 只在 production 出现。", // 「这个」修饰名词，不是口头语
+        ];
+        for t in skip_ok {
+            assert!(settled_enough(t), "应该跳过模型: {t}");
+        }
+    }
+
+    #[test]
+    fn settled_gate_keeps_long_text_on_model() {
+        let long =
+            "我们这次上线要做的事情很多，先把数据库迁移跑完，再重启服务，最后把日志里的报错整理一下发给我。";
+        assert!(!settled_enough(long), "长文本一律交给模型");
+    }
+
+    #[test]
+    fn settled_gate_can_be_disabled() {
+        std::env::set_var("YANCHU_LLM_SETTLED", "0");
+        let decided = settled_enough("整一下这个需求。");
+        std::env::remove_var("YANCHU_LLM_SETTLED");
+        assert!(!decided, "关掉开关后不该跳过");
     }
 }
