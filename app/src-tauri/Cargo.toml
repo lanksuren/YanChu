@@ -1,6 +1,6 @@
 [package]
 name = "yanchu"
-version = "1.0.0"
+version = "1.1.0"
 description = "言出 —— 按住说话，落成整理好的文字"
 edition = "2021"
 rust-version = "1.77"
