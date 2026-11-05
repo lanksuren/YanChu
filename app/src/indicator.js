@@ -66,13 +66,26 @@ orb.addEventListener('animationend', (e) => {
   if (e.animationName === 'orb-out') orb.classList.remove('leaving');
 });
 
+// 配色由共享的 theme.js 换算成 CSS 变量；和气泡同一份主题。
+function applyTheme(theme) {
+  if (window.Skin) window.Skin.apply(theme);
+}
+
 async function main() {
   const { listen } = window.__TAURI__.event;
+  const { invoke } = window.__TAURI__.core;
   await listen('indicator', (e) => render(e.payload));
+  await listen('theme', (e) => applyTheme(e.payload));
   await listen('shown', playEnter);
   await listen('hiding', playLeave);
+  // 启动时主动拉一次配色：窗口是隐藏创建的，别等第一次换色才生效
   try {
-    const f = await window.__TAURI__.core.invoke('get_flags');
+    applyTheme(await invoke('get_theme'));
+  } catch (e) {
+    console.warn('读取指示器配色失败', e);
+  }
+  try {
+    const f = await invoke('get_flags');
     if (f && f.reduced_motion) document.documentElement.classList.add('reduced-motion');
   } catch {}
 }

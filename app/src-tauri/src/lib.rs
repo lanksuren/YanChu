@@ -406,6 +406,9 @@ pub fn run() {
             quit_app,
             get_ui,
             save_ui,
+            get_theme,
+            save_theme,
+            reset_theme,
             get_trigger,
             check_trigger,
             save_trigger,
@@ -1831,14 +1834,50 @@ fn get_flags() -> serde_json::Value {
     serde_json::json!({ "reduced_motion": rm })
 }
 
-/// 控制面板：读气泡外观参数
+/// 控制面板：读气泡外观参数（尺寸 + 配色）
 #[tauri::command]
-fn get_ui() -> serde_json::Value {    let ui = ui::BubbleUi::load(&asr::model_root());
+fn get_ui() -> serde_json::Value {
+    let ui = ui::BubbleUi::load(&asr::model_root());
     serde_json::json!({
         "width": ui.width,
         "height": ui.height,
         "font_size": ui.font_size,
+        "theme": ui.theme,
     })
+}
+
+/// 只读配色。气泡 / 指示器启动时拉一次，不依赖事件时序。
+#[tauri::command]
+fn get_theme() -> serde_json::Value {
+    serde_json::to_value(ui::BubbleUi::load(&asr::model_root()).theme).unwrap_or_default()
+}
+
+/// 控制面板：改配色。颜色是即时生效的，所以单独一个命令，不和尺寸保存绑在一起。
+#[tauri::command]
+fn save_theme(app: AppHandle, theme: ui::Theme) -> Result<serde_json::Value, String> {
+    write_theme(&app, theme)
+}
+
+/// 恢复默认配色（跟随系统浅色 / 深色）。
+#[tauri::command]
+fn reset_theme(app: AppHandle) -> Result<serde_json::Value, String> {
+    write_theme(&app, ui::Theme::default())
+}
+
+fn write_theme(app: &AppHandle, theme: ui::Theme) -> Result<serde_json::Value, String> {
+    let root = asr::model_root();
+    let mut ui = ui::BubbleUi::load(&root);
+    ui.theme = theme.clamped();
+    ui.save(&root).map_err(|e| format!("保存配色失败：{e}"))?;
+
+    let value = serde_json::to_value(&ui.theme).map_err(|e| e.to_string())?;
+    // 三个窗口都监听这一条：气泡 / 指示器直接换色，面板刷新预览。
+    let _ = app.emit("theme", value.clone());
+    log::info!(
+        "配色已更新（跟随系统 = {}）",
+        ui.theme.is_default()
+    );
+    Ok(value)
 }
 
 /// 控制面板：改气泡外观。存盘 + 立刻把窗口改成新尺寸。
@@ -1849,25 +1888,30 @@ fn save_ui(
     height: u32,
     font_size: f32,
 ) -> Result<serde_json::Value, String> {
+    // 尺寸保存不能把已经调好的配色冲掉：先把当前主题读回来。
+    let theme = ui::BubbleUi::load(&asr::model_root()).theme;
     let ui = ui::BubbleUi {
         width,
         height,
         font_size,
+        theme,
     }
     .clamped();
     ui.save(&asr::model_root()).map_err(|e| e.to_string())?;
-    apply_bubble_ui(&app, ui);
-    log::info!(
-        "气泡外观：{}x{}，字号 {}",
-        ui.width,
-        ui.height,
-        ui.font_size
-    );
-    Ok(serde_json::json!({
+    let value = serde_json::json!({
         "width": ui.width,
         "height": ui.height,
         "font_size": ui.font_size,
-    }))
+        "theme": ui.theme,
+    });
+    apply_bubble_ui(&app, ui);
+    log::info!(
+        "气泡外观：{}x{}，字号 {}",
+        value["width"],
+        value["height"],
+        value["font_size"]
+    );
+    Ok(value)
 }
 
 /// 把外观参数应用到气泡窗口（尺寸）和页面（字号）。

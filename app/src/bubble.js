@@ -26,21 +26,29 @@ function applyUi(ui) {
   }
 }
 
-// 定稿的句子只在「比上次更长」时闪一下，而且**只闪新增的那几个字**。
+// 配色由共享的 theme.js 换算成 CSS 变量（见 theme.js 顶部说明）。
+// 设置面板换色时会推一次 theme 事件；页面加载时再主动拉一次兜底。
+function applyTheme(theme) {
+  if (window.Skin) window.Skin.apply(theme);
+}
+
+// 定稿的句子只在「比上次更长」时过渡一下，而且**只过渡新增的那几个字**。
 //
 // 以前是给整个 #committed 加背景高亮：一秒钟定稿三句就整块闪三下，
 // 读起来像屏幕在跳（2026-11-04 用户反馈「整体会闪好几下」）。
-// 现在把新增部分包成 <span class="fresh">，高亮范围就是那几个字。
-function setCommitted(text) {
-  // 内容没变就别动 DOM：每 700ms 一次的空写入会掐断正在播放的高亮动画
+// 2026-11-05 再去掉背景：现在只把新增的几个字从灰字色过渡到正文色，
+// 不碰背景。只有流式（partial）才需要这个反馈；提示 / 定稿 / 报错是整段替换，
+// 加了反而会让错误信息先闪一下正文色。
+function setCommitted(text, flash = false) {
+  // 内容没变就别动 DOM：每 700ms 一次的空写入会掐断正在播放的过渡动画
   if (text === committedEl.textContent) return;
 
   const prev = committedEl.dataset.text || '';
-  const grew = text.length > prev.length && text.startsWith(prev);
+  const grew = flash && text.length > prev.length && text.startsWith(prev);
   committedEl.dataset.text = text;
 
   if (!grew) {
-    // 整段替换（润色/定稿）不闪：那是另一件事，闪起来只会变成噪音
+    // 整段替换（润色/定稿/提示）不过渡：那是另一件事，动起来只会变成噪音
     committedEl.textContent = text;
     return;
   }
@@ -75,7 +83,8 @@ function render({ kind, committed, tail, text, status }) {
     return;
   }
 
-  setCommitted(committed || '');
+  // 只有这里是「灰字正在变成正文」：新定的几个字做颜色过渡
+  setCommitted(committed || '', true);
   tailEl.textContent = tail || '';
   syncOverflow();
 }
@@ -124,11 +133,14 @@ async function main() {
   const { invoke } = window.__TAURI__.core;
   await listen('bubble', (e) => render(e.payload));
   await listen('ui', (e) => applyUi(e.payload));
+  await listen('theme', (e) => applyTheme(e.payload));
   await listen('shown', playEnter);
   await listen('hiding', playLeave);
   // 首帧可能早于页面加载，主动拉一次
   try {
-    applyUi(await invoke('get_ui'));
+    const ui = await invoke('get_ui');
+    applyUi(ui);
+    applyTheme(ui.theme);
   } catch (e) {
     console.warn('读取气泡外观参数失败', e);
   }

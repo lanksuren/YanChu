@@ -713,8 +713,271 @@ document.getElementById('runRules').addEventListener('click', (ev) => runPolish(
 document.getElementById('runBoth').addEventListener('click', (ev) => runPolish(true, false, ev.currentTarget));
 document.getElementById('runDeep').addEventListener('click', (ev) => runPolish(true, true, ev.currentTarget));
 
-// ---------------- 气泡外观 ----------------
+// ---------------- 外观：尺寸 + 皮肤配色 ----------------
 const BUBBLE_DEFAULTS = { width: 440, height: 100, font_size: 10.5 };
+
+// 预设是「整组颜色」，点一下换完；想细调再动下面的取色器。
+// 字段名与 src-tauri/src/ui.rs 的 Theme 一致；默认预设留空 = 跟随系统。
+const SKIN_PRESETS = [
+  {
+    id: 'auto',
+    name: '默认',
+    theme: {},
+  },
+  {
+    id: 'cloud',
+    name: '云白',
+    theme: {
+      bubbleBg: '#ffffff',
+      bubbleAlpha: 0.9,
+      bubbleText: '#111827',
+      bubbleTail: '#8b95a5',
+      bubbleBorder: '#e2e8f0',
+      accent: '#2563eb',
+      ok: '#059669',
+      warn: '#d97706',
+      polish: '#7c3aed',
+    },
+  },
+  {
+    id: 'graphite',
+    name: '石墨',
+    theme: {
+      bubbleBg: '#1b1d23',
+      bubbleAlpha: 0.92,
+      bubbleText: '#e7e9ee',
+      bubbleTail: '#9aa3b2',
+      bubbleBorder: '#333844',
+      accent: '#7aa7ff',
+      ok: '#34d399',
+      warn: '#fbbf24',
+      polish: '#a78bfa',
+    },
+  },
+  {
+    id: 'paper',
+    name: '米黄',
+    theme: {
+      bubbleBg: '#fbf4e6',
+      bubbleAlpha: 0.95,
+      bubbleText: '#2f2415',
+      bubbleTail: '#a08a68',
+      bubbleBorder: '#e6d6b8',
+      accent: '#b45309',
+      ok: '#15803d',
+      warn: '#b45309',
+      polish: '#7c3aed',
+    },
+  },
+  {
+    id: 'mint',
+    name: '薄荷',
+    theme: {
+      bubbleBg: '#eafaf1',
+      bubbleAlpha: 0.95,
+      bubbleText: '#123c2b',
+      bubbleTail: '#7aa38f',
+      bubbleBorder: '#c9e8d9',
+      accent: '#0d9488',
+      ok: '#059669',
+      warn: '#d97706',
+      polish: '#7c3aed',
+    },
+  },
+  {
+    id: 'dusk',
+    name: '暮紫',
+    theme: {
+      bubbleBg: '#221b33',
+      bubbleAlpha: 0.92,
+      bubbleText: '#f1eaff',
+      bubbleTail: '#a99bc4',
+      bubbleBorder: '#3b3054',
+      accent: '#a78bfa',
+      ok: '#34d399',
+      warn: '#fbbf24',
+      polish: '#c4b5fd',
+    },
+  },
+];
+
+// 主题字段 → 取色器 / 色值文本 → theme.js 解析后的颜色名
+const SKIN_COLORS = [
+  { key: 'bubbleBg', input: 'skinBg', hex: 'skinBgHex', color: 'bg' },
+  { key: 'bubbleText', input: 'skinText', hex: 'skinTextHex', color: 'text' },
+  { key: 'bubbleTail', input: 'skinTail', hex: 'skinTailHex', color: 'tail' },
+  { key: 'accent', input: 'skinAccent', hex: 'skinAccentHex', color: 'accent' },
+  { key: 'bubbleBorder', input: 'skinBorder', hex: 'skinBorderHex', color: 'border' },
+  { key: 'ok', input: 'skinOk', hex: 'skinOkHex', color: 'ok' },
+  { key: 'warn', input: 'skinWarn', hex: 'skinWarnHex', color: 'warn' },
+  { key: 'polish', input: 'skinPolish', hex: 'skinPolishHex', color: 'polish' },
+];
+
+let skinTheme = {};
+let skinResolved = null;
+let skinSaveTimer = null;
+
+function setSkinHint(text, kind = '') {
+  const el = document.getElementById('skinHint');
+  if (!el) return;
+  el.textContent = text;
+  el.className = kind ? `hint ${kind}` : 'hint';
+}
+
+// 只保留主题认识的字段；undefined / null / 空串都算「没填」，
+// 由 theme.js 按背景明暗自动配（0 是合法值，不能一起丢掉）。
+function normalizeSkinTheme(theme) {
+  const keys = window.Skin ? window.Skin.keys : [];
+  const out = {};
+  for (const key of keys) {
+    const value = theme ? theme[key] : undefined;
+    if (value !== undefined && value !== null && value !== '') out[key] = value;
+  }
+  return out;
+}
+
+function sameTheme(a, b) {
+  const keys = window.Skin ? window.Skin.keys : [];
+  return keys.every((key) => {
+    const av = a ? a[key] : undefined;
+    const bv = b ? b[key] : undefined;
+    if (av == null && bv == null) return true;
+    if (typeof av === 'number' || typeof bv === 'number') return Number(av) === Number(bv);
+    return String(av).toLowerCase() === String(bv).toLowerCase();
+  });
+}
+
+// 预览和真气泡用的是同一份主题、同一套换算（theme.js）；
+// 这里只把 #bubblePreview 作为变量挂载点，别污染控制面板自己的配色。
+function syncSkinControls() {
+  if (!skinResolved) return;
+  const colors = skinResolved.colors;
+
+  for (const item of SKIN_COLORS) {
+    const input = document.getElementById(item.input);
+    const hex = document.getElementById(item.hex);
+    const value = colors[item.color];
+    if (input && input.value !== value) input.value = value;
+    if (hex) hex.textContent = value;
+  }
+
+  const alpha = document.getElementById('skinAlpha');
+  if (alpha) alpha.value = Math.round(skinResolved.alpha * 100);
+  const alphaValue = document.getElementById('skinAlphaValue');
+  if (alphaValue) alphaValue.textContent = `${Math.round(skinResolved.alpha * 100)}%`;
+
+  const shadow = document.getElementById('skinShadow');
+  if (shadow) shadow.value = Math.round(skinResolved.shadow * 100);
+  const shadowValue = document.getElementById('skinShadowValue');
+  if (shadowValue) shadowValue.textContent = `${Math.round(skinResolved.shadow * 100)}%`;
+
+  for (const [id, color] of [
+    ['skinOkDot', colors.ok],
+    ['skinWarnDot', colors.warn],
+    ['skinPolishDot', colors.polish],
+  ]) {
+    const dot = document.getElementById(id);
+    if (dot) dot.style.background = color;
+  }
+
+  for (const btn of document.querySelectorAll('#skinPresets .preset')) {
+    const preset = SKIN_PRESETS.find((p) => p.id === btn.dataset.preset);
+    const active = !!preset && sameTheme(preset.theme, skinTheme);
+    btn.classList.toggle('active', active);
+    btn.setAttribute('aria-pressed', active ? 'true' : 'false');
+  }
+}
+
+function renderSkinPresets() {
+  const wrap = document.getElementById('skinPresets');
+  if (!wrap) return;
+  wrap.replaceChildren();
+  for (const preset of SKIN_PRESETS) {
+    const resolved = window.Skin ? window.Skin.resolve(preset.theme) : null;
+    const dots = ['bg', 'text', 'accent'].map((key) => {
+      const dot = document.createElement('i');
+      if (resolved) dot.style.background = resolved.colors[key];
+      return dot;
+    });
+
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'preset';
+    btn.dataset.preset = preset.id;
+    btn.setAttribute('aria-pressed', 'false');
+    btn.title = `套用「${preset.name}」配色`;
+    const mark = document.createElement('span');
+    mark.className = 'preset-dots';
+    mark.append(...dots);
+    const name = document.createElement('span');
+    name.textContent = preset.name;
+    btn.append(mark, name);
+    btn.addEventListener('click', () => {
+      applySkin({ ...preset.theme }, true);
+      setSkinHint(`已套用「${preset.name}」，可继续细调`);
+    });
+    wrap.append(btn);
+  }
+}
+
+function applySkin(theme, persist = false) {
+  if (!window.Skin) return;
+  skinTheme = normalizeSkinTheme(theme);
+  skinResolved = window.Skin.apply(skinTheme, document.getElementById('bubblePreview'));
+  syncSkinControls();
+  if (persist) scheduleSkinSave();
+}
+
+function scheduleSkinSave() {
+  if (skinSaveTimer) clearTimeout(skinSaveTimer);
+  setSkinHint('正在保存配色…');
+  skinSaveTimer = setTimeout(() => {
+    skinSaveTimer = null;
+    invoke('save_theme', { theme: skinTheme })
+      .then((saved) => {
+        // 后端会夹紧数值、丢掉非法色值：以后端返回的为准，别再触发一次保存
+        applySkin(saved, false);
+        setSkinHint('配色已保存');
+      })
+      .catch((e) => {
+        console.error('保存配色失败', e);
+        setSkinHint(`保存失败：${e}`, 'error');
+      });
+  }, 220);
+}
+
+for (const item of SKIN_COLORS) {
+  const input = document.getElementById(item.input);
+  if (!input) continue;
+  input.addEventListener('input', () => {
+    applySkin({ ...skinTheme, [item.key]: input.value }, true);
+  });
+}
+
+document.getElementById('skinAlpha').addEventListener('input', (e) => {
+  applySkin({ ...skinTheme, bubbleAlpha: Number(e.target.value) / 100 }, true);
+});
+
+document.getElementById('skinShadow').addEventListener('input', (e) => {
+  applySkin({ ...skinTheme, bubbleShadow: Number(e.target.value) / 100 }, true);
+});
+
+document.getElementById('resetSkin').addEventListener('click', async (ev) => {
+  const btn = ev.currentTarget;
+  await withBusy(btn, '恢复中…', async () => {
+    const saved = await invoke('reset_theme');
+    applySkin(saved, false);
+    setSkinHint('已恢复默认配色（跟随系统）');
+  });
+  toast('已恢复默认配色');
+});
+
+// 系统浅色/深色切换时，默认配色要跟着变；自定义主题不受影响。
+if (window.matchMedia) {
+  window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+    applySkin(skinTheme, false);
+  });
+}
 
 async function loadBubbleUi() {
   const ui = await invoke('get_ui');
@@ -722,6 +985,7 @@ async function loadBubbleUi() {
   document.getElementById('bubbleHeight').value = ui.height;
   document.getElementById('bubbleFont').value = ui.font_size;
   updateBubblePreview();
+  applySkin(ui.theme || {}, false);
   document.getElementById('bubbleHint').textContent =
     `当前 ${ui.width} × ${ui.height} px · 字号 ${ui.font_size}`;
 }
@@ -738,6 +1002,8 @@ function updateBubblePreview() {
   card.style.fontSize = `${f}px`;
 }
 
+renderSkinPresets();
+
 for (const id of ['bubbleWidth', 'bubbleHeight', 'bubbleFont']) {
   document.getElementById(id).addEventListener('input', updateBubblePreview);
 }
@@ -750,7 +1016,7 @@ document.getElementById('saveBubbleUi').addEventListener('click', async (ev) => 
   const ui = await withBusy(btn, '保存中…', () => invoke('save_ui', { width, height, fontSize }));
   document.getElementById('bubbleHint').textContent =
     `已保存 ${ui.width} × ${ui.height} px · 字号 ${ui.font_size}`;
-  toast('气泡外观已保存');
+  toast('气泡尺寸已保存');
 });
 
 document.getElementById('resetBubbleUi').addEventListener('click', async (ev) => {
@@ -762,8 +1028,8 @@ document.getElementById('resetBubbleUi').addEventListener('click', async (ev) =>
       fontSize: BUBBLE_DEFAULTS.font_size,
     }));
   await loadBubbleUi();
-  document.getElementById('bubbleHint').textContent = '已恢复默认';
-  toast('已恢复默认');
+  document.getElementById('bubbleHint').textContent = '已恢复默认尺寸';
+  toast('已恢复默认尺寸');
 });
 
 // ---------------- 触发键与输入模式 ----------------
@@ -1531,6 +1797,12 @@ window.__TAURI__.event
     if (saveTriggerBtn) saveTriggerBtn.disabled = false;
   })
   .catch((e) => console.error('订阅触发键事件失败', e));
+
+// 配色可能在别处被改（托盘重置、以后的多面板）：预览跟着走。
+// 自己保存时后端也会回发这一条，所以不要再触发保存。
+window.__TAURI__.event
+  .listen('theme', (e) => applySkin(e.payload, false))
+  .catch((e) => console.error('订阅配色事件失败', e));
 
 // ---------------- 概览：就绪状态 ----------------
 function setDot(id, cls) {

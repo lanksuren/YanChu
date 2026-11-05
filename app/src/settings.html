@@ -50,7 +50,7 @@
         <div class="pane-head">
           <div>
             <h2>设置</h2>
-            <p>输入方式、能力开关与气泡外观</p>
+            <p>输入方式、能力开关与外观皮肤</p>
           </div>
         </div>
 
@@ -167,15 +167,118 @@
           </div>
         </div>
 
-        <div class="card">
+        <div class="card" id="appearanceCard">
           <div class="card-head">
-            <h2 class="card-title">气泡外观</h2>
-            <span class="tag subtle">保存后生效</span>
+            <h2 class="card-title">外观 · 气泡与指示器</h2>
+            <span class="tag subtle">配色即时生效</span>
           </div>
-          <div class="bubble-preview" id="bubblePreview">
-            <span class="preview-caption">实时预览</span>
-            <div class="bp-card" id="bpCard">示例：把这段逻辑抽成一个 helper 函数，然后重启服务。</div>
+          <div class="skin-preview">
+            <div class="subhead">
+              <strong>实时预览</strong>
+              <span class="hint">气泡与鼠标指示器</span>
+            </div>
+            <div class="bubble-preview" id="bubblePreview">
+              <div class="bp-card" id="bpCard"><span class="bp-committed">示例：把这段逻辑抽成</span><span class="bp-tail">一个 helper 函数，然后重启服务。</span></div>
+              <div class="bp-orb" aria-hidden="true">
+                <span class="bp-halo"></span>
+                <span class="bp-ring"></span>
+                <span class="bp-core"></span>
+              </div>
+              <span class="bp-label bubble">气泡</span>
+              <span class="bp-label widget">鼠标指示器</span>
+            </div>
           </div>
+
+          <div class="skin-presets" id="skinPresets" role="group" aria-label="配色预设"></div>
+
+          <div class="field-grid skin-grid">
+            <label class="skin-field">
+              <span class="field-label">气泡背景</span>
+              <span class="color-well">
+                <input type="color" id="skinBg" aria-label="气泡背景颜色" />
+                <span class="color-hex" id="skinBgHex"></span>
+              </span>
+            </label>
+            <label class="skin-field">
+              <span class="field-label">已定稿文字</span>
+              <span class="color-well">
+                <input type="color" id="skinText" aria-label="气泡文字颜色" />
+                <span class="color-hex" id="skinTextHex"></span>
+              </span>
+            </label>
+            <label class="skin-field">
+              <span class="field-label">未定稿文字</span>
+              <span class="color-well">
+                <input type="color" id="skinTail" aria-label="未定稿文字颜色" />
+                <span class="color-hex" id="skinTailHex"></span>
+              </span>
+            </label>
+            <label class="skin-field">
+              <span class="field-label">指示器主色</span>
+              <span class="color-well">
+                <input type="color" id="skinAccent" aria-label="指示器主色" />
+                <span class="color-hex" id="skinAccentHex"></span>
+              </span>
+            </label>
+          </div>
+
+          <div class="skin-sliders">
+            <label class="skin-range">
+              <span class="field-label">背景不透明度</span>
+              <input type="range" id="skinAlpha" min="15" max="100" step="1" aria-label="气泡背景不透明度" />
+              <span class="range-value" id="skinAlphaValue"></span>
+            </label>
+            <label class="skin-range">
+              <span class="field-label">投影强度</span>
+              <input type="range" id="skinShadow" min="0" max="200" step="5" aria-label="气泡投影强度" />
+              <span class="range-value" id="skinShadowValue"></span>
+            </label>
+          </div>
+
+          <details class="skin-more">
+            <summary>
+              <svg class="chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg>
+              更多配色 · 描边与状态色
+            </summary>
+            <div class="field-grid skin-grid">
+              <label class="skin-field">
+                <span class="field-label">气泡描边</span>
+                <span class="color-well">
+                  <input type="color" id="skinBorder" aria-label="气泡描边颜色" />
+                  <span class="color-hex" id="skinBorderHex"></span>
+                </span>
+              </label>
+              <label class="skin-field">
+                <span class="field-label">完成 <i class="skin-dot" id="skinOkDot"></i></span>
+                <span class="color-well">
+                  <input type="color" id="skinOk" aria-label="完成状态颜色" />
+                  <span class="color-hex" id="skinOkHex"></span>
+                </span>
+              </label>
+              <label class="skin-field">
+                <span class="field-label">提示 <i class="skin-dot" id="skinWarnDot"></i></span>
+                <span class="color-well">
+                  <input type="color" id="skinWarn" aria-label="提示状态颜色" />
+                  <span class="color-hex" id="skinWarnHex"></span>
+                </span>
+              </label>
+              <label class="skin-field">
+                <span class="field-label">润色 <i class="skin-dot" id="skinPolishDot"></i></span>
+                <span class="color-well">
+                  <input type="color" id="skinPolish" aria-label="润色状态颜色" />
+                  <span class="color-hex" id="skinPolishHex"></span>
+                </span>
+              </label>
+            </div>
+          </details>
+
+          <div class="skin-foot">
+            <span class="hint" id="skinHint">换色即时生效，自动保存</span>
+            <button id="resetSkin" class="ghost" type="button">恢复默认配色</button>
+          </div>
+
+          <div class="divider"></div>
+
           <div class="field-grid">
             <label class="field">
               <span class="field-label">宽度</span>
@@ -201,8 +304,8 @@
           </div>
           <div class="card-foot">
             <span class="hint" id="bubbleHint"></span>
-            <button id="resetBubbleUi" class="ghost" type="button">恢复默认</button>
-            <button id="saveBubbleUi" class="primary" type="button">保存外观</button>
+            <button id="resetBubbleUi" class="ghost" type="button">恢复默认尺寸</button>
+            <button id="saveBubbleUi" class="primary" type="button">保存尺寸</button>
           </div>
         </div>
 
@@ -443,6 +546,7 @@
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
+  <script src="theme.js"></script>
   <script src="settings.js"></script>
 </body>
 </html>

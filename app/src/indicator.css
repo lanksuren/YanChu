@@ -37,7 +37,11 @@ html, body {
 #halo {
   width: 44px;
   height: 44px;
-  background: radial-gradient(circle, rgba(37, 99, 235, 0.35) 0%, rgba(37, 99, 235, 0) 70%);
+  background: radial-gradient(
+    circle,
+    var(--accent-halo, rgba(37, 99, 235, 0.35)) 0%,
+    var(--accent-halo-0, rgba(37, 99, 235, 0)) 70%
+  );
   transform: scale(1);
   opacity: 0.25;
   transition: transform var(--dur-instant) var(--ease-out), opacity var(--dur-instant) var(--ease-out);
@@ -47,7 +51,7 @@ html, body {
 #ring {
   width: 40px;
   height: 40px;
-  border: 2px solid rgba(37, 99, 235, 0.85);
+  border: 2px solid var(--accent-ring, rgba(37, 99, 235, 0.85));
   opacity: 0.35;
   /* 透明度/颜色用 --dur-base 过渡：状态切换（说话↔停）不再是一下子跳过去 */
   transition: transform var(--dur-instant) var(--ease-out),
@@ -59,7 +63,7 @@ html, body {
 #core {
   width: 12px;
   height: 12px;
-  background: var(--accent);
+  background: var(--accent, #2563eb);
   transition: transform var(--dur-instant) var(--ease-out),
               background var(--dur-base) ease;
 }
@@ -69,8 +73,8 @@ html, body {
   width: 44px;
   height: 44px;
   border: 2px solid transparent;
-  border-top-color: var(--polish);
-  border-right-color: rgba(124, 58, 237, 0.35);
+  border-top-color: var(--polish, #7c3aed);
+  border-right-color: var(--polish-soft, rgba(124, 58, 237, 0.35));
   opacity: 0;
   transform: rotate(0deg);
   transition: opacity var(--dur-fast) var(--ease-out);
@@ -82,7 +86,7 @@ html, body {
   width: 22px;
   height: 22px;
   fill: none;
-  stroke: var(--ok);
+  stroke: var(--ok, #059669);
   stroke-width: 2.4;
   stroke-linecap: round;
   stroke-linejoin: round;
@@ -102,11 +106,11 @@ html, body {
 
 /* 有声音：核心变亮，环跟着 level 放大（由 JS 驱动） */
 #orb[data-state="speaking"] #ring { opacity: 0.85; }
-#orb[data-state="speaking"] #core { background: #1d4ed8; }
+#orb[data-state="speaking"] #core { background: var(--accent-strong, #1d4ed8); }
 
 /* 润色中：旋转 */
 #orb[data-state="polishing"] #spinner { opacity: 1; animation: spin 900ms linear infinite; }
-#orb[data-state="polishing"] #core { background: var(--polish); }
+#orb[data-state="polishing"] #core { background: var(--polish, #7c3aed); }
 #orb[data-state="polishing"] #ring { opacity: 0.15; }
 #orb[data-state="polishing"] #halo { opacity: 0.18; }
 
@@ -114,25 +118,25 @@ html, body {
 #orb[data-state="done"] #core {
   width: 24px;
   height: 24px;
-  background: var(--ok);
+  background: var(--ok, #059669);
   animation: core-pop var(--dur-base) var(--ease-spring);
 }
 #orb[data-state="done"] #ring {
-  border-color: rgba(5, 150, 105, 0.8);
+  border-color: var(--ok-ring-ind, rgba(5, 150, 105, 0.8));
   opacity: 0.6;
   animation: done-ring var(--dur-slow) var(--ease-out);
 }
 #orb[data-state="done"] #check {
   width: 24px;
   height: 24px;
-  stroke: #fff;
+  stroke: var(--on-ok, #fff);
   opacity: 1;
   animation: check-draw 220ms var(--ease-out) both;
 }
 
 /* 提示 */
-#orb[data-state="notice"] #core { background: var(--warn); }
-#orb[data-state="notice"] #ring { border-color: rgba(217, 119, 6, 0.7); opacity: 0.5; }
+#orb[data-state="notice"] #core { background: var(--warn, #d97706); }
+#orb[data-state="notice"] #ring { border-color: var(--warn-ring, rgba(217, 119, 6, 0.7)); opacity: 0.5; }
 
 /* 空闲：基本不显示 */
 #orb[data-state="idle"] { opacity: 0; }
