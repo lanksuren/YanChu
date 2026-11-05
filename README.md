@@ -461,3 +461,9 @@ powershell -ExecutionPolicy Bypass -File spike\insert-spike.ps1
 - 识别默认不走 VAD 断句（实测负收益）
 - 气泡显示瞬间 WebView2 会抢一次焦点，已用「抢到就还回去」兜住，但不是零成本
 - 麦克风采集只用 wav 冒充验证过，真人录音尚未跑
+
+## 参与
+
+- 想提改动：先看 [CONTRIBUTING.md](CONTRIBUTING.md)（环境、测试、隐私红线、提交信息风格）
+- 发现安全问题：走 [SECURITY.md](SECURITY.md) 的私密报告，不要开公开 issue
+- 许可：[MIT](LICENSE)

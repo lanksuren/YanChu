@@ -1,0 +1,47 @@
+name: 录音与转录检查
+
+# 公开仓库的第一道服务端防线。
+# 别人 fork 出来的 PR 没有本地的 .githooks，所以这里再查一遍。
+# 只用只读 token，不 checkout PR 的代码，也不执行任何来自 PR 的东西。
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  no-audio:
+    name: 不允许提交录音、转录或回放报告
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检查 PR 改动的文件
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+
+          list="${RUNNER_TEMP:-/tmp}/changed.txt"
+          gh api --paginate "/repos/$REPO/pulls/$PR/files" --jq '.[].filename' > "$list"
+          echo "PR 改动 $(wc -l < "$list") 个文件"
+
+          audio=$(grep -Ei '\.(wav|mp3|m4a|flac|ogg|opus|webm|aac|wma|amr)$' "$list" || true)
+          devlog=$(grep -E '^devlog/' "$list" || true)
+          replay=$(grep -E '^bench/replay/(corpus.*\.jsonl|r[^/]*\.md|s-[^/]*\.md|t-[^/]*\.md|u-[^/]*\.md|rating\.md)$' "$list" || true)
+          history=$(grep -E '^bench/history/' "$list" | grep -v -E 'README\.md$' || true)
+
+          blocked=$(printf '%s\n%s\n%s\n%s\n' "$audio" "$devlog" "$replay" "$history" | grep -v '^$' | sort -u || true)
+
+          if [ -n "$blocked" ]; then
+            echo "::error::录音 / 转录文件不能进仓库，请从 PR 里去掉："
+            printf '%s\n' "$blocked"
+            echo ""
+            echo "原因见 README 的「语料与隐私」一节；本地提交前可以启用 .githooks 提前拦住。"
+            exit 1
+          fi
+
+          echo "没有发现录音或转录文件。"
