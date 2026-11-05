@@ -1,0 +1,27 @@
+#!/bin/sh
+# 拒绝把录音、转录、回放报告提交进仓库。
+# 启用：git config core.hooksPath .githooks
+# 应急：git commit --no-verify（会留在提交历史里，慎用）
+
+staged=$(git diff --cached --name-only --diff-filter=ACMR)
+[ -z "$staged" ] && exit 0
+
+# 1) 音频文件、开发采集目录、真人语料的回放报告
+hits=$(printf '%s\n' "$staged" | grep -E -i \
+  '\.(wav|mp3|m4a|flac|ogg|opus|webm|aac|wma|amr)$|^devlog/|^bench/replay/(corpus.*\.jsonl|r[^/]*\.md|s-[^/]*\.md|t-[^/]*\.md|u-[^/]*\.md|rating\.md)$')
+
+# 2) bench/history 只放行 README.md（讲方法的那份）
+hist=$(printf '%s\n' "$staged" | grep -E '^bench/history/' | grep -v -E 'README\.md$')
+
+blocked=$(printf '%s\n%s\n' "$hits" "$hist" | grep -v '^$')
+
+if [ -n "$blocked" ]; then
+  echo "提交被拒绝：以下文件是录音/转录/回放报告，不应进仓库。" >&2
+  printf '%s\n' "$blocked" | sed 's/^/  /' >&2
+  echo "" >&2
+  echo "先 git restore --staged <文件>，再提交其余改动。" >&2
+  echo "确实要提交时用 git commit --no-verify。" >&2
+  exit 1
+fi
+
+exit 0

@@ -77,6 +77,24 @@
 术语那道坎换 Qwen3-ASR 能到 96%，但识别延迟会从 146ms 涨到 1131ms。
 两条路都已实现，用 `YANCHU_ASR_ENGINE` 切换。详细数据与取舍见 [bench/RESULTS.md](bench/RESULTS.md)。
 
+### 语料与隐私
+
+说过的话和声音只留在本机，不进仓库，也不会随仓库上传：
+
+| 位置 | 是什么 |
+|---|---|
+| `devlog/` | 开发模式采集：整段 wav、每句切片、全链路 jsonl |
+| `bench/history/` | 从真实会话回收的 20 段：wav + 当时的识别原文 |
+| `bench/replay/` | 真人语料跑出来的回放报告，正文逐段列了「原文 / 规则层 / 成品」 |
+| 任意 `*.wav` / `*.mp3` / `*.m4a` 等 | 一律不认，可能是本机麦克风录的 |
+
+挡两道：`.gitignore` 排除，`.githooks/pre-commit` 再拦一次（启用一次即可：
+`git config core.hooksPath .githooks`，紧急情况用 `git commit --no-verify` 绕过）。
+
+要复现验收数字，在本机重新录一遍：`tools\record-corpus.ps1`、`tools\make-history-corpus.ps1`
+只写本地目录；合成语料用 `bench\make-corpus.ps1` 重建。运行期的听写历史在
+`%APPDATA%\YanChu\history\`，同样在仓库之外。
+
 ## 目录
 
 ```
