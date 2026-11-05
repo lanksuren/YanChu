@@ -26,19 +26,39 @@ tools/.e2e-target.exe
 tools/.e2e-dump.txt
 tools/.e2e-app.log
 
-# 开发模式采集（音频 + 录音日志，只在本地留着分析用）
+# ---------------- 隐私：录音与转录，永不入库 ----------------
+# 任何音频都不进仓库：可能是本机麦克风录下的真人声音
+*.wav
+*.mp3
+*.m4a
+*.flac
+*.ogg
+*.opus
+*.webm
+
+# 开发模式采集（整段 wav + 每句切片 + 全链路 jsonl）
 devlog/
 .devlog-*/
+
+# 真人语料：wav 与识别原文都来自真实会话，只留本地
+#（README.md 讲方法，可以入库）
+bench/real/*.wav
+bench/history/*
+!bench/history/README.md
+tools/.lat-*.wav
+
+# 用真人录音跑出来的回放报告：正文含每段的「原文 / 规则层 / 成品」
+#（guard-cases / person-cases 是手写的合成用例，仍入库）
+bench/replay/corpus.jsonl
+bench/replay/corpus-long.jsonl
+bench/replay/r*.md
+bench/replay/s-*.md
+bench/replay/t-*.md
+bench/replay/u-*.md
+bench/replay/rating.md
 
 # 编辑器
 .vscode/
 .idea/
 .DS_Store
 Thumbs.db
-
-# ����������Ƶ������¼�ƣ������ֿ⣻prompts.txt ������
-bench/real/*.wav
-tools/.lat-*.wav
-
-# ��ʷ�Ự���յ��������ϣ���Ƶ�Ǳ���¼���������ֿ⣻txt ��������У����
-bench/history/*.wav
